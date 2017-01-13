@@ -1,0 +1,25 @@
+Source: ima-evm-utils
+Section: utils
+Priority: optional
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Standards-Version: 3.9.8
+Build-Depends: asciidoc,
+ debhelper (>= 9),
+ dh-autoreconf,
+ docbook-xsl,
+ libattr1-dev,
+ libkeyutils-dev,
+ libssl-dev,
+ openssl,
+ pkg-config,
+ xsltproc
+
+Package: ima-evm-utils
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, attr, keyutils
+Description: Linux IMA Extended Verification Module signing tools
+ The package provides the Linux Integrity Measurement Architecture (IMA)
+ Extended Verification Module (EVM) tools.
+ .
+ With EVM, the security sensitive extended attributes are verified against
+ offline tampering.
