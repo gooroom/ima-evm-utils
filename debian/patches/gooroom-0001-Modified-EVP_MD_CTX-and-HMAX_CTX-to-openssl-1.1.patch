@@ -1,0 +1,276 @@
+From 07c86512fd8e84258252bfc311007eae170a8724 Mon Sep 17 00:00:00 2001
+From: "jongkyung.woo" <jkwoo@gooroom.kr>
+Date: Thu, 2 Nov 2017 20:33:13 +0900
+Subject: [PATCH] Modified EVP_MD_CTX and HMAX_CTX to openssl version 1.1
+
+Change-Id: I1caefa271bbfcce4f9fa58da5fdc0dd00ecc733e
+---
+ src/evmctl.c    | 56 +++++++++++++++++++++++++++++++++++++++++++-------------
+ src/libimaevm.c | 49 ++++++++++++++++++++++++++++++++++++-------------
+ 2 files changed, 79 insertions(+), 26 deletions(-)
+
+diff --git a/src/evmctl.c b/src/evmctl.c
+index c20cbfe..f055c77 100644
+--- a/src/evmctl.c
++++ b/src/evmctl.c
+@@ -305,7 +305,7 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
+ 	struct stat st;
+ 	int err;
+ 	uint32_t generation = 0;
+-	EVP_MD_CTX ctx;
++	EVP_MD_CTX *ctx;
+ 	unsigned int mdlen;
+ 	char **xattrname;
+ 	char xattr_value[1024];
+@@ -315,6 +315,19 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
+ 	struct h_misc_64 hmac_misc;
+ 	int hmac_size;
+ 
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++	ctx = EVP_MD_CTX_new();
++#else
++	ctx = malloc(sizeof(*ctx));
++#endif
++
++	if (!ctx) {
++		fprintf(stderr, "Out of memory: EVP_MD_CTX!\n");
++		return(-1);
++	}
++
++	EVP_MD_CTX_init(ctx);
++
+ 	if (lstat(file, &st)) {
+ 		log_err("Failed to stat: %s\n", file);
+ 		return -1;
+@@ -345,7 +358,7 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
+ 		return -1;
+ 	}
+ 
+-	err = EVP_DigestInit(&ctx, EVP_sha1());
++	err = EVP_DigestInit(ctx, EVP_sha1());
+ 	if (!err) {
+ 		log_err("EVP_DigestInit() failed\n");
+ 		return 1;
+@@ -364,7 +377,7 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
+ 		/*log_debug("name: %s, value: %s, size: %d\n", *xattrname, xattr_value, err);*/
+ 		log_info("name: %s, size: %d\n", *xattrname, err);
+ 		log_debug_dump(xattr_value, err);
+-		err = EVP_DigestUpdate(&ctx, xattr_value, err);
++		err = EVP_DigestUpdate(ctx, xattr_value, err);
+ 		if (!err) {
+ 			log_err("EVP_DigestUpdate() failed\n");
+ 			return 1;
+@@ -412,7 +425,7 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
+ 	log_debug("hmac_misc (%d): ", hmac_size);
+ 	log_debug_dump(&hmac_misc, hmac_size);
+ 
+-	err = EVP_DigestUpdate(&ctx, &hmac_misc, hmac_size);
++	err = EVP_DigestUpdate(ctx, &hmac_misc, hmac_size);
+ 	if (!err) {
+ 		log_err("EVP_DigestUpdate() failed\n");
+ 		return 1;
+@@ -423,14 +436,14 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
+ 		if (err)
+ 			return -1;
+ 
+-		err = EVP_DigestUpdate(&ctx, (const unsigned char *)uuid, sizeof(uuid));
++		err = EVP_DigestUpdate(ctx, (const unsigned char *)uuid, sizeof(uuid));
+ 		if (!err) {
+ 			log_err("EVP_DigestUpdate() failed\n");
+ 			return 1;
+ 		}
+ 	}
+ 
+-	err = EVP_DigestFinal(&ctx, hash, &mdlen);
++	err = EVP_DigestFinal(ctx, hash, &mdlen);
+ 	if (!err) {
+ 		log_err("EVP_DigestFinal() failed\n");
+ 		return 1;
+@@ -844,7 +857,7 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
+ 	struct stat st;
+ 	int err = -1;
+ 	uint32_t generation = 0;
+-	HMAC_CTX ctx;
++	HMAC_CTX *ctx;
+ 	unsigned int mdlen;
+ 	char **xattrname;
+ 	unsigned char xattr_value[1024];
+@@ -856,6 +869,19 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
+ 	struct h_misc_64 hmac_misc;
+ 	int hmac_size;
+ 
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++	ctx = HMAC_CTX_new();
++#else
++	ctx = malloc(sizeof(*ctx);
++#endif
++
++	if (!ctx) {
++		fprintf(stderr, "Out of memory: HMAC_CTX!\n");
++		return(-1);
++	}
++
++	HMAC_CTX_reset(ctx);
++
+ 	key = file2bin(keyfile, NULL, &keylen);
+ 	if (!key) {
+ 		log_err("Failed to read a key: %s\n", keyfile);
+@@ -900,9 +926,9 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
+ 		goto out;
+ 	}
+ 
+-	err = !HMAC_Init(&ctx, evmkey, sizeof(evmkey), EVP_sha1());
++	err = !HMAC_Init_ex(ctx, evmkey, sizeof(evmkey), EVP_sha1(), NULL);
+ 	if (err) {
+-		log_err("HMAC_Init() failed\n");
++		log_err("HMAC_Init_ex() failed\n");
+ 		goto out;
+ 	}
+ 
+@@ -919,7 +945,7 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
+ 		/*log_debug("name: %s, value: %s, size: %d\n", *xattrname, xattr_value, err);*/
+ 		log_info("name: %s, size: %d\n", *xattrname, err);
+ 		log_debug_dump(xattr_value, err);
+-		err = !HMAC_Update(&ctx, xattr_value, err);
++		err = !HMAC_Update(ctx, xattr_value, err);
+ 		if (err) {
+ 			log_err("HMAC_Update() failed\n");
+ 			goto out_ctx_cleanup;
+@@ -960,16 +986,20 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
+ 	log_debug("hmac_misc (%d): ", hmac_size);
+ 	log_debug_dump(&hmac_misc, hmac_size);
+ 
+-	err = !HMAC_Update(&ctx, (const unsigned char *)&hmac_misc, hmac_size);
++	err = !HMAC_Update(ctx, (const unsigned char *)&hmac_misc, hmac_size);
+ 	if (err) {
+ 		log_err("HMAC_Update() failed\n");
+ 		goto out_ctx_cleanup;
+ 	}
+-	err = !HMAC_Final(&ctx, hash, &mdlen);
++	err = !HMAC_Final(ctx, hash, &mdlen);
+ 	if (err)
+ 		log_err("HMAC_Final() failed\n");
+ out_ctx_cleanup:
+-	HMAC_CTX_cleanup(&ctx);
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++	HMAC_CTX_reset(ctx);
++#else
++	HMAC_CTX_cleanup(ctx);
++#endif
+ out:
+ 	free(key);
+ 	return err ?: mdlen;
+diff --git a/src/libimaevm.c b/src/libimaevm.c
+index 575f053..b39135c 100644
+--- a/src/libimaevm.c
++++ b/src/libimaevm.c
+@@ -269,10 +269,23 @@ int ima_calc_hash(const char *file, uint8_t *hash)
+ {
+ 	const EVP_MD *md;
+ 	struct stat st;
+-	EVP_MD_CTX ctx;
++	EVP_MD_CTX *ctx;
+ 	unsigned int mdlen;
+ 	int err;
+ 
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++	ctx = EVP_MD_CTX_new();
++#else
++	ctx = malloc(sizeof(*ctx));
++#endif
++
++	if (!ctx) {
++		fprintf(stderr, "Out of memory: EVP_MD_CTX!\n");
++		return(-1);
++	}
++
++	EVP_MD_CTX_init(ctx);
++
+ 	/*  Need to know the file length */
+ 	err = lstat(file, &st);
+ 	if (err < 0) {
+@@ -286,7 +299,7 @@ int ima_calc_hash(const char *file, uint8_t *hash)
+ 		return 1;
+ 	}
+ 
+-	err = EVP_DigestInit(&ctx, md);
++	err = EVP_DigestInit(ctx, md);
+ 	if (!err) {
+ 		log_err("EVP_DigestInit() failed\n");
+ 		return 1;
+@@ -294,17 +307,17 @@ int ima_calc_hash(const char *file, uint8_t *hash)
+ 
+ 	switch (st.st_mode & S_IFMT) {
+ 	case S_IFREG:
+-		err = add_file_hash(file, &ctx);
++		err = add_file_hash(file, ctx);
+ 		break;
+ 	case S_IFDIR:
+-		err = add_dir_hash(file, &ctx);
++		err = add_dir_hash(file, ctx);
+ 		break;
+ 	case S_IFLNK:
+-		err = add_link_hash(file, &ctx);
++		err = add_link_hash(file, ctx);
+ 		break;
+ 	case S_IFIFO: case S_IFSOCK:
+ 	case S_IFCHR: case S_IFBLK:
+-		err = add_dev_hash(&st, &ctx);
++		err = add_dev_hash(&st, ctx);
+ 		break;
+ 	default:
+ 		log_errno("Unsupported file type");
+@@ -314,7 +327,7 @@ int ima_calc_hash(const char *file, uint8_t *hash)
+ 	if (err)
+ 		return err;
+ 
+-	err = EVP_DigestFinal(&ctx, hash, &mdlen);
++	err = EVP_DigestFinal(ctx, hash, &mdlen);
+ 	if (!err) {
+ 		log_err("EVP_DigestFinal() failed\n");
+ 		return 1;
+@@ -548,6 +561,16 @@ int key2bin(RSA *key, unsigned char *pub)
+ 	int len, b, offset = 0;
+ 	struct pubkey_hdr *pkh = (struct pubkey_hdr *)pub;
+ 
++	const BIGNUM *n;
++	const BIGNUM *e;
++
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++	RSA_get0_key(key, &n, NULL, &e);
++#else
++	n = key->n;
++	e = key->e;
++#endif
++
+ 	/* add key header */
+ 	pkh->version = 1;
+ 	pkh->timestamp = 0;	/* PEM has no timestamp?? */
+@@ -556,18 +579,18 @@ int key2bin(RSA *key, unsigned char *pub)
+ 
+ 	offset += sizeof(*pkh);
+ 
+-	len = BN_num_bytes(key->n);
+-	b = BN_num_bits(key->n);
++	len = BN_num_bytes(n);
++	b = BN_num_bits(n);
+ 	pub[offset++] = b >> 8;
+ 	pub[offset++] = b & 0xff;
+-	BN_bn2bin(key->n, &pub[offset]);
++	BN_bn2bin(n, &pub[offset]);
+ 	offset += len;
+ 
+-	len = BN_num_bytes(key->e);
+-	b = BN_num_bits(key->e);
++	len = BN_num_bytes(e);
++	b = BN_num_bits(e);
+ 	pub[offset++] = b >> 8;
+ 	pub[offset++] = b & 0xff;
+-	BN_bn2bin(key->e, &pub[offset]);
++	BN_bn2bin(e, &pub[offset]);
+ 	offset += len;
+ 
+ 	return offset;
+-- 
+2.11.0
+

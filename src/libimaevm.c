@@ -269,9 +269,22 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 {
 	const EVP_MD *md;
 	struct stat st;
-	EVP_MD_CTX ctx;
+	EVP_MD_CTX *ctx;
 	unsigned int mdlen;
 	int err;
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	ctx = EVP_MD_CTX_new();
+#else
+	ctx = malloc(sizeof(*ctx));
+#endif
+
+	if (!ctx) {
+		fprintf(stderr, "Out of memory: EVP_MD_CTX!\n");
+		return(-1);
+	}
+
+	EVP_MD_CTX_init(ctx);
 
 	/*  Need to know the file length */
 	err = lstat(file, &st);
@@ -286,7 +299,7 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 		return 1;
 	}
 
-	err = EVP_DigestInit(&ctx, md);
+	err = EVP_DigestInit(ctx, md);
 	if (!err) {
 		log_err("EVP_DigestInit() failed\n");
 		return 1;
@@ -294,17 +307,17 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 
 	switch (st.st_mode & S_IFMT) {
 	case S_IFREG:
-		err = add_file_hash(file, &ctx);
+		err = add_file_hash(file, ctx);
 		break;
 	case S_IFDIR:
-		err = add_dir_hash(file, &ctx);
+		err = add_dir_hash(file, ctx);
 		break;
 	case S_IFLNK:
-		err = add_link_hash(file, &ctx);
+		err = add_link_hash(file, ctx);
 		break;
 	case S_IFIFO: case S_IFSOCK:
 	case S_IFCHR: case S_IFBLK:
-		err = add_dev_hash(&st, &ctx);
+		err = add_dev_hash(&st, ctx);
 		break;
 	default:
 		log_errno("Unsupported file type");
@@ -314,7 +327,7 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 	if (err)
 		return err;
 
-	err = EVP_DigestFinal(&ctx, hash, &mdlen);
+	err = EVP_DigestFinal(ctx, hash, &mdlen);
 	if (!err) {
 		log_err("EVP_DigestFinal() failed\n");
 		return 1;
@@ -548,6 +561,16 @@ int key2bin(RSA *key, unsigned char *pub)
 	int len, b, offset = 0;
 	struct pubkey_hdr *pkh = (struct pubkey_hdr *)pub;
 
+	const BIGNUM *n;
+	const BIGNUM *e;
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	RSA_get0_key(key, &n, NULL, &e);
+#else
+	n = key->n;
+	e = key->e;
+#endif
+
 	/* add key header */
 	pkh->version = 1;
 	pkh->timestamp = 0;	/* PEM has no timestamp?? */
@@ -556,18 +579,18 @@ int key2bin(RSA *key, unsigned char *pub)
 
 	offset += sizeof(*pkh);
 
-	len = BN_num_bytes(key->n);
-	b = BN_num_bits(key->n);
+	len = BN_num_bytes(n);
+	b = BN_num_bits(n);
 	pub[offset++] = b >> 8;
 	pub[offset++] = b & 0xff;
-	BN_bn2bin(key->n, &pub[offset]);
+	BN_bn2bin(n, &pub[offset]);
 	offset += len;
 
-	len = BN_num_bytes(key->e);
-	b = BN_num_bits(key->e);
+	len = BN_num_bytes(e);
+	b = BN_num_bits(e);
 	pub[offset++] = b >> 8;
 	pub[offset++] = b & 0xff;
-	BN_bn2bin(key->e, &pub[offset]);
+	BN_bn2bin(e, &pub[offset]);
 	offset += len;
 
 	return offset;
