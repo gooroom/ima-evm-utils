@@ -1,3 +1,12 @@
+ima-evm-utils (1.0-0ubuntu4+grm1u1) zesty; urgency=medium
+
+  [ jongkyung.woo ]
+  * [fa84c2af] Modified EVP_MD_CTX and HMAX_CTX to openssl version 1.1
+
+  [ Gooroom Autobuilder ]
+
+ -- Gooroom Autobuilder <jenkins@gooroom.kr>  Tue, 14 Nov 2017 10:05:40 +0900
+
 ima-evm-utils (1.0-0ubuntu4) zesty; urgency=medium
 
   * Add missing build-dep on docbook-xsl.
