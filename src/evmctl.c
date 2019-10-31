@@ -133,9 +133,9 @@ static int bin2file(const char *file, const char *ext, const unsigned char *data
 	int err;
 
 	if (ext)
-		sprintf(name, "%s.%s", file, ext);
+		snprintf(name, sizeof(name), "%s.%s", file, ext);
 	else
-		sprintf(name, "%s", file);
+		snprintf(name, sizeof(name), "%s", file);
 
 	log_info("Writing to %s\n", name);
 
@@ -157,9 +157,9 @@ static unsigned char *file2bin(const char *file, const char *ext, int *size)
 	char name[strlen(file) + (ext ? strlen(ext) : 0) + 2];
 
 	if (ext)
-		sprintf(name, "%s.%s", file, ext);
+		snprintf(name, sizeof(name), "%s.%s", file, ext);
 	else
-		sprintf(name, "%s", file);
+		snprintf(name, sizeof(name), "%s", file);
 
 	log_info("Reading to %s\n", name);
 
@@ -271,9 +271,7 @@ static int get_uuid(struct stat *st, char *uuid)
 {
 	uint32_t dev;
 	unsigned minor, major;
-	char path[PATH_MAX], _uuid[37];
-	FILE *fp;
-	size_t len;
+	char _uuid[37], *p_uuid = NULL, *cmd = NULL;
 
 	if (hmac_flags & HMAC_FLAG_UUID_SET)
 		return pack_uuid(uuid_str, uuid);
@@ -283,15 +281,19 @@ static int get_uuid(struct stat *st, char *uuid)
 	minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
 
 	log_debug("dev: %u:%u\n", major, minor);
-	sprintf(path, "blkid -s UUID -o value /dev/block/%u:%u", major, minor);
 
-	fp = popen(path, "r");
-	if (!fp)
+	cmd = g_strdup_printf ("/sbin/blkid -s UUID -o value /dev/block/%u:%u", major, minor);
+	if (!g_spawn_command_line_sync (cmd, &p_uuid, NULL, NULL, NULL)) {
+		g_free (cmd);
 		goto err;
+	}
 
-	len = fread(_uuid, 1, sizeof(_uuid), fp);
-	pclose(fp);
-	if (len != sizeof(_uuid))
+	snprintf(_uuid, sizeof(_uuid), "%s", p_uuid);
+
+	g_free (p_uuid);
+	g_free (cmd);
+
+	if (strlen(_uuid) != 37)
 		goto err;
 
 	return pack_uuid(_uuid, uuid);
@@ -1174,7 +1176,7 @@ static int tpm_pcr_read(int idx, uint8_t *pcr, int len)
 	FILE *fp;
 	char *p, pcr_str[7], buf[70]; /* length of the TPM string */
 
-	sprintf(pcr_str, "PCR-%d", idx);
+	snprintf(pcr_str, sizeof(pcr_str), "PCR-%d", idx);
 
 	fp = fopen(pcrs, "r");
 	if (!fp) {

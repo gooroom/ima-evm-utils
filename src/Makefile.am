@@ -12,9 +12,9 @@ include_HEADERS = imaevm.h
 bin_PROGRAMS = evmctl
 
 evmctl_SOURCES = evmctl.c
-evmctl_CPPFLAGS = $(OPENSSL_CFLAGS)
+evmctl_CPPFLAGS = $(OPENSSL_CFLAGS) $(GLIB_CFLAGS)
 evmctl_LDFLAGS = $(LDFLAGS_READLINE)
-evmctl_LDADD =  $(OPENSSL_LIBS) -lkeyutils libimaevm.la
+evmctl_LDADD =  $(OPENSSL_LIBS) $(GLIB_LIBS) -lkeyutils libimaevm.la
 
 INCLUDES = -I$(top_srcdir) -include config.h
 

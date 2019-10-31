@@ -50,10 +50,10 @@
 #include <openssl/rsa.h>
 
 #ifdef USE_FPRINTF
-#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, fmt, ##args); })
+#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, "%s", fmt, ##args); })
 #define do_log_dump(level, p, len, cr)	({ if (level <= params.verbose) do_dump(stderr, p, len, cr); })
 #else
-#define do_log(level, fmt, args...)	syslog(level, fmt, ##args)
+#define do_log(level, fmt, args...)	syslog(level, "%s", fmt, ##args)
 #define do_log_dump(level, p, len, cr)
 #endif
 

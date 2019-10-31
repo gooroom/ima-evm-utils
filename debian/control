@@ -12,6 +12,7 @@ Build-Depends: asciidoc,
  libssl-dev,
  openssl,
  pkg-config,
+ libglib2.0-dev,
  xsltproc
 
 Package: ima-evm-utils

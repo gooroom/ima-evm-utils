@@ -1,0 +1,135 @@
+From 3680b6e9ff6a7d9d58a9717688759f5f1dc6159f Mon Sep 17 00:00:00 2001
+From: "jongkyung.woo" <jkwoo@gooroom.kr>
+Date: Thu, 31 Oct 2019 19:01:11 +0900
+Subject: [PATCH] Fixed Flawfinder - High Priority
+
+Change-Id: I4776f557ab0efa49dcc341b55e754f5e0792470c
+---
+ configure.ac    |  1 +
+ src/Makefile.am |  4 ++--
+ src/evmctl.c    | 30 ++++++++++++++++--------------
+ src/imaevm.h    |  4 ++--
+ 4 files changed, 21 insertions(+), 18 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index d834226..2b324ad 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -25,6 +25,7 @@ LT_INIT
+ AC_HEADER_STDC
+ 
+ PKG_CHECK_MODULES(OPENSSL, [ openssl >= 0.9.8 ])
++PKG_CHECK_MODULES([GLIB], [glib-2.0])
+ AC_SUBST(OPENSSL_CFLAGS)
+ AC_SUBST(OPENSSL_LIBS)
+ AC_CHECK_HEADER(unistd.h)
+diff --git a/src/Makefile.am b/src/Makefile.am
+index deb18fb..9d4300e 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -12,9 +12,9 @@ include_HEADERS = imaevm.h
+ bin_PROGRAMS = evmctl
+ 
+ evmctl_SOURCES = evmctl.c
+-evmctl_CPPFLAGS = $(OPENSSL_CFLAGS)
++evmctl_CPPFLAGS = $(OPENSSL_CFLAGS) $(GLIB_CFLAGS)
+ evmctl_LDFLAGS = $(LDFLAGS_READLINE)
+-evmctl_LDADD =  $(OPENSSL_LIBS) -lkeyutils libimaevm.la
++evmctl_LDADD =  $(OPENSSL_LIBS) $(GLIB_LIBS) -lkeyutils libimaevm.la
+ 
+ INCLUDES = -I$(top_srcdir) -include config.h
+ 
+diff --git a/src/evmctl.c b/src/evmctl.c
+index f055c77..490028d 100644
+--- a/src/evmctl.c
++++ b/src/evmctl.c
+@@ -133,9 +133,9 @@ static int bin2file(const char *file, const char *ext, const unsigned char *data
+ 	int err;
+ 
+ 	if (ext)
+-		sprintf(name, "%s.%s", file, ext);
++		snprintf(name, sizeof(name), "%s.%s", file, ext);
+ 	else
+-		sprintf(name, "%s", file);
++		snprintf(name, sizeof(name), "%s", file);
+ 
+ 	log_info("Writing to %s\n", name);
+ 
+@@ -157,9 +157,9 @@ static unsigned char *file2bin(const char *file, const char *ext, int *size)
+ 	char name[strlen(file) + (ext ? strlen(ext) : 0) + 2];
+ 
+ 	if (ext)
+-		sprintf(name, "%s.%s", file, ext);
++		snprintf(name, sizeof(name), "%s.%s", file, ext);
+ 	else
+-		sprintf(name, "%s", file);
++		snprintf(name, sizeof(name), "%s", file);
+ 
+ 	log_info("Reading to %s\n", name);
+ 
+@@ -271,9 +271,7 @@ static int get_uuid(struct stat *st, char *uuid)
+ {
+ 	uint32_t dev;
+ 	unsigned minor, major;
+-	char path[PATH_MAX], _uuid[37];
+-	FILE *fp;
+-	size_t len;
++	char _uuid[37], *p_uuid = NULL, *cmd = NULL;
+ 
+ 	if (hmac_flags & HMAC_FLAG_UUID_SET)
+ 		return pack_uuid(uuid_str, uuid);
+@@ -283,15 +281,19 @@ static int get_uuid(struct stat *st, char *uuid)
+ 	minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
+ 
+ 	log_debug("dev: %u:%u\n", major, minor);
+-	sprintf(path, "blkid -s UUID -o value /dev/block/%u:%u", major, minor);
+ 
+-	fp = popen(path, "r");
+-	if (!fp)
++	cmd = g_strdup_printf ("/sbin/blkid -s UUID -o value /dev/block/%u:%u", major, minor);
++	if (!g_spawn_command_line_sync (cmd, &p_uuid, NULL, NULL, NULL)) {
++		g_free (cmd);
+ 		goto err;
++	}
++
++	snprintf(_uuid, sizeof(_uuid), "%s", p_uuid);
++
++	g_free (p_uuid);
++	g_free (cmd);
+ 
+-	len = fread(_uuid, 1, sizeof(_uuid), fp);
+-	pclose(fp);
+-	if (len != sizeof(_uuid))
++	if (strlen(_uuid) != 37)
+ 		goto err;
+ 
+ 	return pack_uuid(_uuid, uuid);
+@@ -1174,7 +1176,7 @@ static int tpm_pcr_read(int idx, uint8_t *pcr, int len)
+ 	FILE *fp;
+ 	char *p, pcr_str[7], buf[70]; /* length of the TPM string */
+ 
+-	sprintf(pcr_str, "PCR-%d", idx);
++	snprintf(pcr_str, sizeof(pcr_str), "PCR-%d", idx);
+ 
+ 	fp = fopen(pcrs, "r");
+ 	if (!fp) {
+diff --git a/src/imaevm.h b/src/imaevm.h
+index 711596c..defb240 100644
+--- a/src/imaevm.h
++++ b/src/imaevm.h
+@@ -50,10 +50,10 @@
+ #include <openssl/rsa.h>
+ 
+ #ifdef USE_FPRINTF
+-#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, fmt, ##args); })
++#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, "%s", fmt, ##args); })
+ #define do_log_dump(level, p, len, cr)	({ if (level <= params.verbose) do_dump(stderr, p, len, cr); })
+ #else
+-#define do_log(level, fmt, args...)	syslog(level, fmt, ##args)
++#define do_log(level, fmt, args...)	syslog(level, "%s", fmt, ##args)
+ #define do_log_dump(level, p, len, cr)
+ #endif
+ 
+-- 
+2.20.1
+
