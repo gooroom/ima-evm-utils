@@ -1,3 +1,13 @@
+ima-evm-utils (1.0-0ubuntu4+grm2u1) unstable; urgency=medium
+
+  [ jongkyung.woo ]
+  * [ab70722e] Fixed Flawfinder - High Priority
+  * [32ff8289] Updated control
+
+  [ Gooroom Autobuilder ]
+
+ -- Gooroom Autobuilder <jenkins@gooroom.kr>  Tue, 03 Dec 2019 10:37:15 +0900
+
 ima-evm-utils (1.0-0ubuntu4+grm1u1) zesty; urgency=medium
 
   [ jongkyung.woo ]
