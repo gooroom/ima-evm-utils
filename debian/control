@@ -1,7 +1,8 @@
 Source: ima-evm-utils
 Section: utils
 Priority: optional
-Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Maintainer: gooroom <gooroom@gooroom.kr>
+XSBC-Original-Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
 Standards-Version: 3.9.8
 Build-Depends: asciidoc,
  debhelper (>= 9),
@@ -12,8 +13,10 @@ Build-Depends: asciidoc,
  libssl-dev,
  openssl,
  pkg-config,
- libglib2.0-dev,
  xsltproc
+Homepage: http://www.gooroom.kr
+Vcs-Git: https://github.com/gooroom/ima-evm-utils
+Vcs-Browser: https://github.com/gooroom/ima-evm-utils
 
 Package: ima-evm-utils
 Architecture: any
