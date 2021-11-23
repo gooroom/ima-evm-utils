@@ -1,7 +1,6 @@
-Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: ima-evm-utils
-Upstream-Contact: http://sourceforge.net/p/linux-ima/ima-evm-utils/
-Source: http://sourceforge.net/projects/linux-ima/files/ima-evm-utils/
+Source: https://sourceforge.net/projects/linux-ima/files/ima-evm-utils/
 
 Files: evmctl.c, libimaevm.c
 Copyright:

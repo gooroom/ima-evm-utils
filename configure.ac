@@ -1,7 +1,7 @@
 # autoconf script
 
 AC_PREREQ([2.65])
-AC_INIT(ima-evm-utils, 1.0, dmitry.kasatkin@huawei.com)
+AC_INIT(ima-evm-utils, 1.1, zohar@linux.vnet.ibm.com)
 AM_INIT_AUTOMAKE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
@@ -25,7 +25,6 @@ LT_INIT
 AC_HEADER_STDC
 
 PKG_CHECK_MODULES(OPENSSL, [ openssl >= 0.9.8 ])
-PKG_CHECK_MODULES([GLIB], [glib-2.0])
 AC_SUBST(OPENSSL_CFLAGS)
 AC_SUBST(OPENSSL_LIBS)
 AC_CHECK_HEADER(unistd.h)
