@@ -874,7 +874,7 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 	ctx = HMAC_CTX_new();
 #else
-	ctx = malloc(sizeof(*ctx);
+	ctx = malloc(sizeof(*ctx));
 #endif
 
 	if (!ctx) {
