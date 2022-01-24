@@ -1,0 +1,3 @@
+0001-README-fix-misspellings.patch
+0002-tests-Makefile.am-don-t-overwrite-distclean-target.patch
+0003-evmctl-cache-uuid.patch

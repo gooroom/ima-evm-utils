@@ -1,0 +1,27 @@
+From: Dmitry Baryshkov <dbaryshkov@gmail.com>
+Date: Wed, 28 Oct 2020 11:11:12 +0300
+Subject: tests/Makefile.am: don't overwrite distclean target
+
+When automake sees dependency-only 'distclean' target it doesn't
+generate it's own typical distclean target, leaving files in the build
+dir. Change that to use 'distclean-local' target in Makefile.am to let
+that this is an extension of distclean, rather than a replacement.
+
+Signed-off-by: Dmitry Baryshkov <dbaryshkov@gmail.com>
+---
+ tests/Makefile.am | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index ff928e1..2eda792 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -6,7 +6,7 @@ check_SCRIPTS += ima_hash.test sign_verify.test boot_aggregate.test
+ clean-local:
+ 	-rm -f *.txt *.out *.sig *.sig2
+ 
+-distclean: distclean-keys
++distclean-local: distclean-keys
+ .PHONY: distclean-keys
+ distclean-keys:
+ 	./gen-keys.sh clean

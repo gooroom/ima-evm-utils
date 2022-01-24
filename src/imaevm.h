@@ -46,12 +46,15 @@
 #include <syslog.h>
 #include <stdbool.h>
 #include <errno.h>
-
+#include <sys/types.h>
 #include <openssl/rsa.h>
+#include <openssl/engine.h>
 
 #ifdef USE_FPRINTF
-#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, fmt, ##args); })
-#define do_log_dump(level, p, len, cr)	({ if (level <= params.verbose) do_dump(stderr, p, len, cr); })
+#define do_log(level, fmt, args...)	\
+	({ if (level <= imaevm_params.verbose) fprintf(stderr, fmt, ##args); })
+#define do_log_dump(level, p, len, cr)	\
+	({ if (level <= imaevm_params.verbose) imaevm_do_hexdump(stderr, p, len, cr); })
 #else
 #define do_log(level, fmt, args...)	syslog(level, fmt, ##args)
 #define do_log_dump(level, p, len, cr)
@@ -72,8 +75,15 @@
 #define log_err(fmt, args...)		do_log(LOG_ERR, fmt, ##args)
 #define log_errno(fmt, args...)		do_log(LOG_ERR, fmt ": errno: %s (%d)\n", ##args, strerror(errno), errno)
 
+#ifndef DEFAULT_HASH_ALGO
+#define DEFAULT_HASH_ALGO "sha256"
+#endif
+
 #define	DATA_SIZE	4096
 #define SHA1_HASH_LEN   20
+
+#define MAX_DIGEST_SIZE		64
+#define MAX_SIGNATURE_SIZE	1024
 
 #define __packed __attribute__((packed))
 
@@ -149,6 +159,7 @@ struct signature_hdr {
 	char mpi[0];
 } __packed;
 
+/* reflect enum hash_algo from include/uapi/linux/hash_info.h */
 enum pkey_hash_algo {
 	PKEY_HASH_MD4,
 	PKEY_HASH_MD5,
@@ -158,6 +169,18 @@ enum pkey_hash_algo {
 	PKEY_HASH_SHA384,
 	PKEY_HASH_SHA512,
 	PKEY_HASH_SHA224,
+	PKEY_HASH_RIPE_MD_128,
+	PKEY_HASH_RIPE_MD_256,
+	PKEY_HASH_RIPE_MD_320,
+	PKEY_HASH_WP_256,
+	PKEY_HASH_WP_384,
+	PKEY_HASH_WP_512,
+	PKEY_HASH_TGR_128,
+	PKEY_HASH_TGR_160,
+	PKEY_HASH_TGR_192,
+	PKEY_HASH_SM3_256,
+	PKEY_HASH_STREEBOG_256,
+	PKEY_HASH_STREEBOG_512,
 	PKEY_HASH__LAST
 };
 
@@ -172,15 +195,14 @@ struct signature_v2_hdr {
 	uint8_t sig[0];		/* signature payload */
 } __packed;
 
-
-typedef int (*verify_hash_fn_t)(const char *file, const unsigned char *hash, int size, unsigned char *sig, int siglen, const char *keyfile);
-
-struct libevm_params {
+struct libimaevm_params {
 	int verbose;
 	int x509;
 	const char *hash_algo;
 	const char *keyfile;
 	const char *keypass;
+	uint32_t keyid;		/* keyid overriding value, unless 0. (Host order.) */
+	ENGINE *eng;
 };
 
 struct RSA_ASN1_template {
@@ -188,26 +210,28 @@ struct RSA_ASN1_template {
 	size_t size;
 };
 
-#define	NUM_PCRS 20
+#define	NUM_PCRS 24
 #define DEFAULT_PCR 10
 
-extern const struct RSA_ASN1_template RSA_ASN1_templates[PKEY_HASH__LAST];
-extern struct libevm_params params;
+extern struct libimaevm_params imaevm_params;
 
-void do_dump(FILE *fp, const void *ptr, int len, bool cr);
-void dump(const void *ptr, int len);
-int get_filesize(const char *filename);
+void imaevm_do_hexdump(FILE *fp, const void *ptr, int len, bool cr);
+void imaevm_hexdump(const void *ptr, int len);
 int ima_calc_hash(const char *file, uint8_t *hash);
-int get_hash_algo(const char *algo);
+int imaevm_get_hash_algo(const char *algo);
 RSA *read_pub_key(const char *keyfile, int x509);
+EVP_PKEY *read_pub_pkey(const char *keyfile, int x509);
 
 void calc_keyid_v1(uint8_t *keyid, char *str, const unsigned char *pkey, int len);
-void calc_keyid_v2(uint32_t *keyid, char *str, RSA *key);
+void calc_keyid_v2(uint32_t *keyid, char *str, EVP_PKEY *pkey);
 int key2bin(RSA *key, unsigned char *pub);
+uint32_t imaevm_read_keyid(const char *certfile);
 
 int sign_hash(const char *algo, const unsigned char *hash, int size, const char *keyfile, const char *keypass, unsigned char *sig);
 int verify_hash(const char *file, const unsigned char *hash, int size, unsigned char *sig, int siglen);
 int ima_verify_signature(const char *file, unsigned char *sig, int siglen, unsigned char *digest, int digestlen);
 void init_public_keys(const char *keyfiles);
+int imaevm_hash_algo_from_sig(unsigned char *sig);
+const char *imaevm_hash_algo_by_id(int algo);
 
 #endif

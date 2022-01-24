@@ -1,5 +1,5 @@
 Name:		ima-evm-utils
-Version:	1.1
+Version:	1.4
 Release:	1%{?dist}
 Summary:	ima-evm-utils - IMA/EVM control utility
 Group:		System/Libraries
@@ -11,7 +11,6 @@ BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires:    autoconf
 BuildRequires:    automake
 BuildRequires:    openssl-devel
-BuildRequires:    libattr-devel
 BuildRequires:    keyutils-libs-devel
 
 %description

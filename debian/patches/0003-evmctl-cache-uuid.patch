@@ -1,0 +1,51 @@
+From: Russell Coker <russell@coker.com.au>
+Subject: ima-evm-utils: evmctl -r sign is unreasonably slow due to popen("blkid...) repeatedly
+Date: Wed, 23 Jun 2021 01:29:37 +1000
+
+If you run "evmctl -r sign --rsa --hashalgo sha256 /usr" or a similar big
+subtree it will take a large amount of time due to running blkid once for
+each file.
+
+The following patch caches the last check.  It is not as optimised as it
+might be (it caches the output of blkid not the output of the function) but
+the aim is to avoid the most expensive operation (fork/exec).  In a test on
+a subtree with 6519 files the time taken to run evmctl -r sign went from
+164 seconds to 24 seconds.
+
+Index: ima-evm-utils-1.1/src/evmctl.c
+===================================================================
+--- ima-evm-utils-1.1.orig/src/evmctl.c
++++ ima-evm-utils-1.1/src/evmctl.c
+@@ -285,6 +285,8 @@ static int get_uuid(struct stat *st, cha
+ 	char path[PATH_MAX], _uuid[37];
+ 	FILE *fp;
+ 	size_t len;
++	static unsigned last_minor = 0, last_major = 0;
++	static char last_uuid[37];
+ 
+ 	if (uuid_str)
+ 		return pack_uuid(uuid_str, uuid);
+@@ -293,6 +295,11 @@ static int get_uuid(struct stat *st, cha
+ 	major = (dev & 0xfff00) >> 8;
+ 	minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
+ 
++	if(last_minor == minor && last_major == major)
++	{
++		return pack_uuid(last_uuid, uuid);
++	}
++
+ 	log_debug("dev: %u:%u\n", major, minor);
+ 	sprintf(path, "blkid -s UUID -o value /dev/block/%u:%u", major, minor);
+ 
+@@ -305,6 +312,9 @@ static int get_uuid(struct stat *st, cha
+ 	if (len != sizeof(_uuid))
+ 		goto err;
+ 
++	last_major = major;
++	last_minor = minor;
++	memcpy(last_uuid, _uuid, sizeof(_uuid));
+ 	return pack_uuid(_uuid, uuid);
+ err:
+ 	log_err("Failed to read UUID. Root access might require.\n");
+
+

@@ -1,8 +1,82 @@
-ima-evm-utils (1.1-0ubuntu2) jammy; urgency=medium
+ima-evm-utils (1.4-1.2) unstable; urgency=high
 
-  * No-change rebuild against openssl3
+  * Non-maintainer upload.
+  * d/control: Drop unnecessary build dependency libattr1-dev (Closes: #953929)
+  * d/rules: Skip tests (many depend on extended attrs, Closes: #999824)
 
- -- Simon Chopin <simon.chopin@canonical.com>  Tue, 23 Nov 2021 16:35:03 +0100
+ -- Bastian Germann <bage@debian.org>  Mon, 24 Jan 2022 18:33:09 +0100
+
+ima-evm-utils (1.4-1.1) unstable; urgency=high
+
+  * Non-maintainer upload.
+  * d/libimaevm2.symbols: Correct SO version
+  * d/control: Add docbook-xml build dependency (Closes: #1000162)
+
+ -- Bastian Germann <bage@debian.org>  Mon, 24 Jan 2022 10:49:06 +0100
+
+ima-evm-utils (1.4-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Russell Coker <russell@coker.com.au>  Sat, 22 Jan 2022 14:21:14 +1100
+
+ima-evm-utils (1.3.2-2.1) unstable; urgency=medium
+
+  * Sponsored upload
+
+ -- Russell Coker <russell@coker.com.au>  Fri, 24 Sep 2021 19:43:37 +1000
+
+ima-evm-utils (1.3.2-2) unstable; urgency=medium
+
+  * d/control: remove -guest from salsa URLs (Closes: #992235, #986917, #953929)
+  * d/control: Bump Standards-Version to 4.6.0 (no changes needed)
+  * d/patches: import patch to improve evmctl performance (Closes: #990198)
+
+ -- Dmitry Baryshkov <dbaryshkov@gmail.com>  Thu, 19 Aug 2021 09:38:09 +0300
+
+ima-evm-utils (1.3.2-1) unstable; urgency=medium
+
+  * New upstream version 1.3.2
+
+ -- Dmitry Baryshkov <dbaryshkov@gmail.com>  Tue, 10 Nov 2020 15:25:20 +0300
+
+ima-evm-utils (1.3.1-1) unstable; urgency=medium
+
+  * New upstream version 1.3.1
+  * d/libimaevm*.symbols,.install: switch to new soname
+  * d/control: switch to libimaevm2 soname
+  * d/control: add attr to build-deps to enable tests
+  * d/libimaevm2.symbols: add new symbols
+  * d/control: fix my surname
+  * d/patches: import two patches to fix upstream issues
+  * d/control: Build-Depends on xxd for tests
+
+ -- Dmitry Baryshkov <dbaryshkov@gmail.com>  Wed, 28 Oct 2020 11:35:11 +0300
+
+ima-evm-utils (1.2.1-1) unstable; urgency=medium
+
+  * New upstream release
+  * d/control: rename lib package to libimaevm1 to follow soname
+  * d/control: bump Standards-Version to 4.4.0, no changes needed
+  * d/*: cleanup
+  * d/libimaevm1.symbols: add symbols file
+  * d/control: extend long package descriptions
+  * d/rules: enable full hardening
+
+ -- Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>  Wed, 31 Jul 2019 23:00:21 +0300
+
+ima-evm-utils (1.1-1) unstable; urgency=medium
+
+  * Upload to Debian (Closes: #923792)
+  * d/control: mark myself as maintainer
+  * d/control: split library and -dev packages per Debian policy
+  * d/copyright: fix format
+  * d/rules: simplify
+  * d/clean: remove generated evmctl.1 file on clean
+  * d/control: add Vcs-* information
+  * d/control: add Homepage
+
+ -- Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>  Wed, 06 Mar 2019 01:45:56 +0300
 
 ima-evm-utils (1.1-0ubuntu1) bionic; urgency=medium
 

@@ -2,7 +2,7 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: ima-evm-utils
 Source: https://sourceforge.net/projects/linux-ima/files/ima-evm-utils/
 
-Files: evmctl.c, libimaevm.c
+Files: *
 Copyright:
  Copyright (C) 2011 Nokia Corporation
  Copyright (C) 2011,2012,2013 Intel Corporation

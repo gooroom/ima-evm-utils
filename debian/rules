@@ -1,7 +1,9 @@
 #!/usr/bin/make -f
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
 %:
 	dh $@
 
-override_dh_install:
-	find $(CURDIR)/debian -name *.la | xargs rm -fv {}\;
+override_dh_auto_test:
+# Many tests set extended attributes, which are not guaranteed to work on a system

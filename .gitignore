@@ -21,7 +21,7 @@ missing
 compile
 libtool
 ltmain.sh
-
+test-driver
 
 # Compiled executables
 *.o
@@ -45,6 +45,7 @@ cscope.*
 ncscope.*
 
 # Generated documentation
+*.1
 *.8
 *.5
 manpage.links

@@ -1,5 +1,7 @@
-SUBDIRS = src
+SUBDIRS = src tests
+if MANPAGE_DOCBOOK_XSL
 dist_man_MANS = evmctl.1
+endif
 
 doc_DATA =  examples/ima-genkey-self.sh examples/ima-genkey.sh examples/ima-gen-local-ca.sh
 EXTRA_DIST = autogen.sh $(doc_DATA)
@@ -23,9 +25,7 @@ rpm: $(tarname)
 	cp $(tarname) $(SRCS)/
 	rpmbuild -ba --nodeps $(SPEC)
 
-# requires asciidoc, xslproc, docbook-xsl
-MANPAGE_DOCBOOK_XSL = /usr/share/xml/docbook/stylesheet/docbook-xsl/manpages/docbook.xsl
-
+if MANPAGE_DOCBOOK_XSL
 evmctl.1.html: README
 	@asciidoc -o $@ $<
 
@@ -38,5 +38,6 @@ rmman:
 	rm -f evmctl.1
 
 doc: evmctl.1.html rmman evmctl.1
+endif
 
 .PHONY: $(tarname)

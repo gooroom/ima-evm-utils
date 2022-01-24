@@ -1,0 +1,87 @@
+From: Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
+Date: Wed, 31 Jul 2019 22:43:03 +0300
+Subject: README: fix misspellings
+
+Fix several misspellings noted by lintian.
+
+Signed-off-by: Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
+---
+ README | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/README b/README
+index b37325f..f9a38fc 100644
+--- a/README
++++ b/README
+@@ -79,7 +79,7 @@ The evmctl utility is used for producing and verifying digital signatures, which
+ are used by the Linux kernel integrity subsystem. It is also used for importing keys
+ into the kernel keyring.
+ 
+-Linux integrity subsystem allows to use IMA and EVM signatures. EVM signature
++Linux integrity subsystem allows one to use IMA and EVM signatures. EVM signature
+ protects file metadata, such as file attributes and extended attributes. IMA
+ signature protects file content.
+ 
+@@ -100,8 +100,8 @@ extended attributes.
+ 
+ Kernel configuration option CONFIG_EVM_ATTR_FSUUID controls whether to include
+ filesystem UUID into HMAC and enabled by default. Therefore evmctl also includes
+-fsuuid by default. Providing '--uuid' option without parameter allows to disable
+-usage of fs uuid. Providing '--uuid=UUID' option with parameter allows to use
++fsuuid by default. Providing '--uuid' option without parameter allows one to disable
++usage of fs uuid. Providing '--uuid=UUID' option with parameter allows one to use
+ custom UUID. Providing the '--portable' option will disable usage of the fs uuid
+ and also the inode number and generation.
+ 
+@@ -131,7 +131,7 @@ Integrity keyrings
+ Integrity subsystem uses dedicated IMA/EVM keyrings to search for signature verification
+ keys - '_ima' and '_evm' respectively.
+ 
+-Since 3.13 IMA allows to declare IMA keyring as trusted. It allows only to load keys,
++Since 3.13 IMA allows one to declare IMA keyring as trusted. It allows only to load keys,
+ signed by a key from the system keyring (.system). It means self-signed keys are not
+ allowed. This is a default behavior unless CONFIG_IMA_TRUSTED_KEYRING is undefined.
+ IMA trusted keyring is has different name '.ima'. Trusted keyring requires X509
+@@ -193,7 +193,7 @@ asymmetric keys support:
+ 
+ Configuration file x509_evm.genkey:
+ 
+-	# Begining of the file
++	# Beginning of the file
+ 	[ req ]
+ 	default_bits = 1024
+ 	distinguished_name = req_distinguished_name
+@@ -244,7 +244,7 @@ following steps:
+ 
+ Configuration file ima-local-ca.genkey:
+ 
+-	# Begining of the file
++	# Beginning of the file
+ 	[ req ]
+ 	default_bits = 2048
+ 	distinguished_name = req_distinguished_name
+@@ -275,7 +275,7 @@ Produce X509 in DER format for using while building the kernel:
+ 
+ Configuration file ima.genkey:
+ 
+-	# Begining of the file
++	# Beginning of the file
+ 	[ req ]
+ 	default_bits = 1024
+ 	distinguished_name = req_distinguished_name
+@@ -409,7 +409,7 @@ When using plain RSA public keys in PEM format, use 'evmctl import --rsa' for im
+ 
+     evmctl import --rsa /etc/keys/pubkey_evm.pem $evm_id
+ 
+-Latest version of keyctl allows to import X509 public key certificates:
++Latest version of keyctl allows one to import X509 public key certificates:
+ 
+     cat /etc/keys/x509_ima.der | keyctl padd asymmetric '' $ima_id
+ 
+@@ -441,5 +441,5 @@ COPYING
+ -------
+ 
+ Copyright \(C) 2012 - 2014 Linux Integrity Project. Free use of this software is granted under
+-the terms of the GNU Public License (GPL).
++the terms of the GNU General Public License (GPL).
+ 
