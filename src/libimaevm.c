@@ -214,6 +214,7 @@ static int add_dir_hash(const char *file, EVP_MD_CTX *ctx)
 	DIR *dir;
 	unsigned long long ino, off;
 	unsigned int type;
+	int result = 0;
 
 	dir = opendir(file);
 	if (!dir) {
@@ -233,13 +234,14 @@ static int add_dir_hash(const char *file, EVP_MD_CTX *ctx)
 		err |= EVP_DigestUpdate(ctx, &type, sizeof(type));
 		if (!err) {
 			log_err("EVP_DigestUpdate() failed\n");
-			return 1;
+			result = 1;
+			break;
 		}
 	}
 
 	closedir(dir);
 
-	return 0;
+	return result;
 }
 
 static int add_link_hash(const char *path, EVP_MD_CTX *ctx)
@@ -269,22 +271,15 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 {
 	const EVP_MD *md;
 	struct stat st;
-	EVP_MD_CTX *ctx;
+	EVP_MD_CTX *pctx;
 	unsigned int mdlen;
 	int err;
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	ctx = EVP_MD_CTX_new();
+#if OPENSSL_VERSION_NUMBER < 0x10100000
+	EVP_MD_CTX ctx;
+	pctx = &ctx;
 #else
-	ctx = malloc(sizeof(*ctx));
+	pctx = EVP_MD_CTX_new();
 #endif
-
-	if (!ctx) {
-		fprintf(stderr, "Out of memory: EVP_MD_CTX!\n");
-		return(-1);
-	}
-
-	EVP_MD_CTX_init(ctx);
 
 	/*  Need to know the file length */
 	err = lstat(file, &st);
@@ -299,7 +294,7 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 		return 1;
 	}
 
-	err = EVP_DigestInit(ctx, md);
+	err = EVP_DigestInit(pctx, md);
 	if (!err) {
 		log_err("EVP_DigestInit() failed\n");
 		return 1;
@@ -307,17 +302,17 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 
 	switch (st.st_mode & S_IFMT) {
 	case S_IFREG:
-		err = add_file_hash(file, ctx);
+		err = add_file_hash(file, pctx);
 		break;
 	case S_IFDIR:
-		err = add_dir_hash(file, ctx);
+		err = add_dir_hash(file, pctx);
 		break;
 	case S_IFLNK:
-		err = add_link_hash(file, ctx);
+		err = add_link_hash(file, pctx);
 		break;
 	case S_IFIFO: case S_IFSOCK:
 	case S_IFCHR: case S_IFBLK:
-		err = add_dev_hash(&st, ctx);
+		err = add_dev_hash(&st, pctx);
 		break;
 	default:
 		log_errno("Unsupported file type");
@@ -327,7 +322,7 @@ int ima_calc_hash(const char *file, uint8_t *hash)
 	if (err)
 		return err;
 
-	err = EVP_DigestFinal(ctx, hash, &mdlen);
+	err = EVP_DigestFinal(pctx, hash, &mdlen);
 	if (!err) {
 		log_err("EVP_DigestFinal() failed\n");
 		return 1;
@@ -377,7 +372,8 @@ out:
 	return key;
 }
 
-int verify_hash_v1(const unsigned char *hash, int size, unsigned char *sig, int siglen, const char *keyfile)
+int verify_hash_v1(const char *file, const unsigned char *hash, int size,
+		   unsigned char *sig, int siglen, const char *keyfile)
 {
 	int err, len;
 	SHA_CTX ctx;
@@ -386,7 +382,7 @@ int verify_hash_v1(const unsigned char *hash, int size, unsigned char *sig, int 
 	unsigned char sighash[20];
 	struct signature_hdr *hdr = (struct signature_hdr *)sig;
 
-	log_info("hash: ");
+	log_info("hash-v1: ");
 	log_dump(hash, size);
 
 	key = read_pub_key(keyfile, 0);
@@ -403,24 +399,77 @@ int verify_hash_v1(const unsigned char *hash, int size, unsigned char *sig, int 
 	err = RSA_public_decrypt(siglen - sizeof(*hdr) - 2, sig + sizeof(*hdr) + 2, out, key, RSA_PKCS1_PADDING);
 	RSA_free(key);
 	if (err < 0) {
-		log_err("RSA_public_decrypt() failed: %d\n", err);
+		log_err("%s: RSA_public_decrypt() failed: %d\n", file, err);
 		return 1;
 	}
 
 	len = err;
 
 	if (len != sizeof(sighash) || memcmp(out, sighash, len) != 0) {
-		log_err("Verification failed: %d\n", err);
+		log_err("%s: verification failed: %d\n", file, err);
 		return -1;
-	} else {
-		/*log_info("Verification is OK\n");*/
-		printf("Verification is OK\n");
 	}
 
 	return 0;
 }
 
-int verify_hash_v2(const unsigned char *hash, int size, unsigned char *sig, int siglen, const char *keyfile)
+struct public_key_entry {
+	struct public_key_entry *next;
+	uint32_t keyid;
+	char name[9];
+	RSA *key;
+};
+static struct public_key_entry *public_keys = NULL;
+
+static RSA *find_keyid(uint32_t keyid)
+{
+	struct public_key_entry *entry;
+
+	for (entry = public_keys; entry != NULL; entry = entry->next) {
+		if (entry->keyid == keyid)
+			return entry->key;
+	}
+	return NULL;
+}
+
+void init_public_keys(const char *keyfiles)
+{
+	struct public_key_entry *entry;
+	char *tmp_keyfiles;
+	char *keyfile;
+	int i = 1;
+
+	tmp_keyfiles = strdup(keyfiles);
+
+	while ((keyfile = strsep(&tmp_keyfiles, ", \t")) != NULL) {
+		if (!keyfile)
+			break;
+		if ((*keyfile == '\0') || (*keyfile == ' ') ||
+		    (*keyfile == '\t'))
+			continue;
+
+		entry = malloc(sizeof(struct public_key_entry));
+		if (!entry) {
+			perror("malloc");
+			break;
+		}
+
+		entry->key = read_pub_key(keyfile, 1);
+		if (!entry->key) {
+			free(entry);
+			continue;
+		}
+
+		calc_keyid_v2(&entry->keyid, entry->name, entry->key);
+		sprintf(entry->name, "%x", __be32_to_cpup(&entry->keyid));
+		log_info("key %d: %s %s\n", i++, entry->name, keyfile);
+		entry->next = public_keys;
+		public_keys = entry;
+	}
+}
+
+int verify_hash_v2(const char *file, const unsigned char *hash, int size,
+		   unsigned char *sig, int siglen, const char *keyfile)
 {
 	int err, len;
 	unsigned char out[1024];
@@ -428,17 +477,29 @@ int verify_hash_v2(const unsigned char *hash, int size, unsigned char *sig, int 
 	struct signature_v2_hdr *hdr = (struct signature_v2_hdr *)sig;
 	const struct RSA_ASN1_template *asn1;
 
-	log_info("hash: ");
-	log_dump(hash, size);
+	if (params.verbose > LOG_INFO) {
+		log_info("hash: ");
+		log_dump(hash, size);
+	}
 
-	key = read_pub_key(keyfile, 1);
-	if (!key)
-		return 1;
+	if (public_keys) {
+		key = find_keyid(hdr->keyid);
+		if (!key) {
+			log_err("%s: unknown keyid: %x\n", file,
+				__be32_to_cpup(&hdr->keyid));
+			return -1;
+		}
+	} else {
+		key = read_pub_key(keyfile, 1);
+		if (!key)
+			return 1;
+	}
 
-	err = RSA_public_decrypt(siglen - sizeof(*hdr), sig + sizeof(*hdr), out, key, RSA_PKCS1_PADDING);
-	RSA_free(key);
+
+	err = RSA_public_decrypt(siglen - sizeof(*hdr), sig + sizeof(*hdr),
+				 out, key, RSA_PKCS1_PADDING);
 	if (err < 0) {
-		log_err("RSA_public_decrypt() failed: %d\n", err);
+		log_err("%s: RSA_public_decrypt() failed: %d\n", file, err);
 		return 1;
 	}
 
@@ -447,19 +508,16 @@ int verify_hash_v2(const unsigned char *hash, int size, unsigned char *sig, int 
 	asn1 = &RSA_ASN1_templates[hdr->hash_algo];
 
 	if (len < asn1->size || memcmp(out, asn1->data, asn1->size)) {
-		log_err("Verification failed: %d\n", err);
+		log_err("%s: verification failed: %d\n", file, err);
 		return -1;
 	}
 
 	len -= asn1->size;
 
 	if (len != size || memcmp(out + asn1->size, hash, len)) {
-		log_err("Verification failed: %d\n", err);
+		log_err("%s: verification failed: %d\n", file, err);
 		return -1;
 	}
-
-	/*log_info("Verification is OK\n");*/
-	printf("Verification is OK\n");
 
 	return 0;
 }
@@ -502,7 +560,8 @@ static int get_hash_algo_from_sig(unsigned char *sig)
 		return -1;
 }
 
-int verify_hash(const unsigned char *hash, int size, unsigned char *sig, int siglen)
+int verify_hash(const char *file, const unsigned char *hash, int size, unsigned char *sig,
+		int siglen)
 {
 	const char *key;
 	int x509;
@@ -525,10 +584,11 @@ int verify_hash(const unsigned char *hash, int size, unsigned char *sig, int sig
 			"/etc/keys/x509_evm.der" :
 			"/etc/keys/pubkey_evm.pem";
 
-	return verify_hash(hash, size, sig, siglen, key);
+	return verify_hash(file, hash, size, sig, siglen, key);
 }
 
-int ima_verify_signature(const char *file, unsigned char *sig, int siglen)
+int ima_verify_signature(const char *file, unsigned char *sig, int siglen,
+			 unsigned char *digest, int digestlen)
 {
 	unsigned char hash[64];
 	int hashlen, sig_hash_algo;
@@ -546,11 +606,18 @@ int ima_verify_signature(const char *file, unsigned char *sig, int siglen)
 	/* Use hash algorithm as retrieved from signature */
 	params.hash_algo = pkey_hash_algo[sig_hash_algo];
 
+	/*
+	 * Validate the signature based on the digest included in the
+	 * measurement list, not by calculating the local file digest.
+	 */
+	if (digestlen > 0)
+	    return verify_hash(file, digest, digestlen, sig + 1, siglen - 1);
+
 	hashlen = ima_calc_hash(file, hash);
 	if (hashlen <= 1)
 		return hashlen;
 
-	return verify_hash(hash, hashlen, sig + 1, siglen - 1);
+	return verify_hash(file, hash, hashlen, sig + 1, siglen - 1);
 }
 
 /*
@@ -560,15 +627,13 @@ int key2bin(RSA *key, unsigned char *pub)
 {
 	int len, b, offset = 0;
 	struct pubkey_hdr *pkh = (struct pubkey_hdr *)pub;
+	const BIGNUM *n, *e;
 
-	const BIGNUM *n;
-	const BIGNUM *e;
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	RSA_get0_key(key, &n, NULL, &e);
-#else
+#if OPENSSL_VERSION_NUMBER < 0x10100000
 	n = key->n;
 	e = key->e;
+#else
+	RSA_get0_key(key, &n, &e, NULL);
 #endif
 
 	/* add key header */
@@ -608,9 +673,11 @@ void calc_keyid_v1(uint8_t *keyid, char *str, const unsigned char *pkey, int len
 	log_debug("keyid: ");
 	log_debug_dump(keyid, 8);
 
-	id = __be64_to_cpup((__be64 *) keyid);
-	sprintf(str, "%llX", (unsigned long long)id);
-	log_info("keyid: %s\n", str);
+	if (params.verbose > LOG_INFO) {
+		id = __be64_to_cpup((__be64 *) keyid);
+		sprintf(str, "%llX", (unsigned long long)id);
+		log_info("keyid-v1: %s\n", str);
+	}
 }
 
 void calc_keyid_v2(uint32_t *keyid, char *str, RSA *key)
@@ -628,8 +695,10 @@ void calc_keyid_v2(uint32_t *keyid, char *str, RSA *key)
 	log_debug("keyid: ");
 	log_debug_dump(keyid, 4);
 
-	sprintf(str, "%x", __be32_to_cpup(keyid));
-	log_info("keyid: %s\n", str);
+	if (params.verbose > LOG_INFO) {
+		sprintf(str, "%x", __be32_to_cpup(keyid));
+		log_info("keyid: %s\n", str);
+	}
 
 	free(pkey);
 }
@@ -742,7 +811,7 @@ int sign_hash_v1(const char *hashalgo, const unsigned char *hash, int size, cons
 	blen = (uint16_t *) (sig + sizeof(*hdr));
 	*blen = __cpu_to_be16(len << 3);
 	len += sizeof(*hdr) + 2;
-	log_info("evm/ima signature: %d bytes\n", len);
+	log_info("evm/ima signature-v1: %d bytes\n", len);
 out:
 	RSA_free(key);
 	return len;

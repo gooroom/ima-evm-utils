@@ -50,10 +50,10 @@
 #include <openssl/rsa.h>
 
 #ifdef USE_FPRINTF
-#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, "%s", fmt, ##args); })
+#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, fmt, ##args); })
 #define do_log_dump(level, p, len, cr)	({ if (level <= params.verbose) do_dump(stderr, p, len, cr); })
 #else
-#define do_log(level, fmt, args...)	syslog(level, "%s", fmt, ##args)
+#define do_log(level, fmt, args...)	syslog(level, fmt, ##args)
 #define do_log_dump(level, p, len, cr)
 #endif
 
@@ -82,6 +82,7 @@ enum evm_ima_xattr_type {
 	EVM_XATTR_HMAC,
 	EVM_IMA_XATTR_DIGSIG,
 	IMA_XATTR_DIGEST_NG,
+	EVM_XATTR_PORTABLE_DIGSIG,
 };
 
 struct h_misc {
@@ -172,7 +173,7 @@ struct signature_v2_hdr {
 } __packed;
 
 
-typedef int (*verify_hash_fn_t)(const unsigned char *hash, int size, unsigned char *sig, int siglen, const char *keyfile);
+typedef int (*verify_hash_fn_t)(const char *file, const unsigned char *hash, int size, unsigned char *sig, int siglen, const char *keyfile);
 
 struct libevm_params {
 	int verbose;
@@ -186,6 +187,9 @@ struct RSA_ASN1_template {
 	const uint8_t *data;
 	size_t size;
 };
+
+#define	NUM_PCRS 20
+#define DEFAULT_PCR 10
 
 extern const struct RSA_ASN1_template RSA_ASN1_templates[PKEY_HASH__LAST];
 extern struct libevm_params params;
@@ -202,7 +206,8 @@ void calc_keyid_v2(uint32_t *keyid, char *str, RSA *key);
 int key2bin(RSA *key, unsigned char *pub);
 
 int sign_hash(const char *algo, const unsigned char *hash, int size, const char *keyfile, const char *keypass, unsigned char *sig);
-int verify_hash(const unsigned char *hash, int size, unsigned char *sig, int siglen);
-int ima_verify_signature(const char *file, unsigned char *sig, int siglen);
+int verify_hash(const char *file, const unsigned char *hash, int size, unsigned char *sig, int siglen);
+int ima_verify_signature(const char *file, unsigned char *sig, int siglen, unsigned char *digest, int digestlen);
+void init_public_keys(const char *keyfiles);
 
 #endif

@@ -104,15 +104,26 @@ static int digest;
 static int digsig;
 static int sigfile;
 static char *uuid_str;
+static char *ino_str;
+static char *uid_str;
+static char *gid_str;
+static char *mode_str;
+static char *generation_str;
+static char *caps_str;
+static char *ima_str;
+static char *selinux_str;
 static char *search_type;
+static int measurement_list;
 static int recursive;
 static int msize;
 static dev_t fs_dev;
 static bool evm_immutable;
+static bool evm_portable;
 
-#define HMAC_FLAG_UUID			0x0001
-#define HMAC_FLAG_UUID_SET		0x0002
-static unsigned long hmac_flags = HMAC_FLAG_UUID;
+#define HMAC_FLAG_NO_UUID	0x0001
+#define HMAC_FLAG_CAPS_SET	0x0002
+
+static unsigned long hmac_flags;
 
 typedef int (*find_cb_t)(const char *path);
 static int find(const char *path, int dts, find_cb_t func);
@@ -133,9 +144,9 @@ static int bin2file(const char *file, const char *ext, const unsigned char *data
 	int err;
 
 	if (ext)
-		snprintf(name, sizeof(name), "%s.%s", file, ext);
+		sprintf(name, "%s.%s", file, ext);
 	else
-		snprintf(name, sizeof(name), "%s", file);
+		sprintf(name, "%s", file);
 
 	log_info("Writing to %s\n", name);
 
@@ -157,9 +168,9 @@ static unsigned char *file2bin(const char *file, const char *ext, int *size)
 	char name[strlen(file) + (ext ? strlen(ext) : 0) + 2];
 
 	if (ext)
-		snprintf(name, sizeof(name), "%s.%s", file, ext);
+		sprintf(name, "%s.%s", file, ext);
 	else
-		snprintf(name, sizeof(name), "%s", file);
+		sprintf(name, "%s", file);
 
 	log_info("Reading to %s\n", name);
 
@@ -200,7 +211,7 @@ static int hex_to_bin(char ch)
 	return -1;
 }
 
-static int hex2bin(uint8_t *dst, const char *src, size_t count)
+static int hex2bin(void *dst, const char *src, size_t count)
 {
 	int hi, lo;
 
@@ -214,7 +225,7 @@ static int hex2bin(uint8_t *dst, const char *src, size_t count)
 		if ((hi < 0) || (lo < 0))
 			return -1;
 
-		*dst++ = (hi << 4) | lo;
+		*(uint8_t *)dst++ = (hi << 4) | lo;
 	}
 	return 0;
 }
@@ -271,9 +282,11 @@ static int get_uuid(struct stat *st, char *uuid)
 {
 	uint32_t dev;
 	unsigned minor, major;
-	char _uuid[37], *p_uuid = NULL, *cmd = NULL;
+	char path[PATH_MAX], _uuid[37];
+	FILE *fp;
+	size_t len;
 
-	if (hmac_flags & HMAC_FLAG_UUID_SET)
+	if (uuid_str)
 		return pack_uuid(uuid_str, uuid);
 
 	dev = st->st_dev;
@@ -281,19 +294,15 @@ static int get_uuid(struct stat *st, char *uuid)
 	minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
 
 	log_debug("dev: %u:%u\n", major, minor);
+	sprintf(path, "blkid -s UUID -o value /dev/block/%u:%u", major, minor);
 
-	cmd = g_strdup_printf ("/sbin/blkid -s UUID -o value /dev/block/%u:%u", major, minor);
-	if (!g_spawn_command_line_sync (cmd, &p_uuid, NULL, NULL, NULL)) {
-		g_free (cmd);
+	fp = popen(path, "r");
+	if (!fp)
 		goto err;
-	}
 
-	snprintf(_uuid, sizeof(_uuid), "%s", p_uuid);
-
-	g_free (p_uuid);
-	g_free (cmd);
-
-	if (strlen(_uuid) != 37)
+	len = fread(_uuid, 1, sizeof(_uuid), fp);
+	pclose(fp);
+	if (len != sizeof(_uuid))
 		goto err;
 
 	return pack_uuid(_uuid, uuid);
@@ -307,7 +316,7 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 	struct stat st;
 	int err;
 	uint32_t generation = 0;
-	EVP_MD_CTX *ctx;
+	EVP_MD_CTX *pctx;
 	unsigned int mdlen;
 	char **xattrname;
 	char xattr_value[1024];
@@ -316,29 +325,33 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 	char uuid[16];
 	struct h_misc_64 hmac_misc;
 	int hmac_size;
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	ctx = EVP_MD_CTX_new();
+#if OPENSSL_VERSION_NUMBER < 0x10100000
+	EVP_MD_CTX ctx;
+	pctx = &ctx;
 #else
-	ctx = malloc(sizeof(*ctx));
+	pctx = EVP_MD_CTX_new();
 #endif
-
-	if (!ctx) {
-		fprintf(stderr, "Out of memory: EVP_MD_CTX!\n");
-		return(-1);
-	}
-
-	EVP_MD_CTX_init(ctx);
 
 	if (lstat(file, &st)) {
 		log_err("Failed to stat: %s\n", file);
 		return -1;
 	}
 
+	if (generation_str)
+		generation = strtoul(generation_str, NULL, 10);
+	if (ino_str)
+		st.st_ino = strtoul(ino_str, NULL, 10);
+	if (uid_str)
+		st.st_uid = strtoul(uid_str, NULL, 10);
+	if (gid_str)
+		st.st_gid = strtoul(gid_str, NULL, 10);
+	if (mode_str)
+		st.st_mode = strtoul(mode_str, NULL, 10);
+
 	if (!evm_immutable) {
-		if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) {
-			/* we cannot at the momement to get generation of special files..
-			 * kernel API does not support it */
+		if ((S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) && !generation_str) {
+			/* we cannot at the momement to get generation of
+			   special files kernel API does not support it */
 			int fd = open(file, 0);
 
 			if (fd < 0) {
@@ -347,6 +360,7 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 			}
 			if (ioctl(fd, FS_IOC_GETVERSION, &generation)) {
 				log_err("ioctl() failed\n");
+				close(fd);
 				return -1;
 			}
 			close(fd);
@@ -360,26 +374,39 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 		return -1;
 	}
 
-	err = EVP_DigestInit(ctx, EVP_sha1());
+	err = EVP_DigestInit(pctx, EVP_sha1());
 	if (!err) {
 		log_err("EVP_DigestInit() failed\n");
 		return 1;
 	}
 
 	for (xattrname = evm_config_xattrnames; *xattrname != NULL; xattrname++) {
-		err = lgetxattr(file, *xattrname, xattr_value, sizeof(xattr_value));
-		if (err < 0) {
-			log_info("no xattr: %s\n", *xattrname);
-			continue;
-		}
-		if (!find_xattr(list, list_size, *xattrname)) {
-			log_info("skipping xattr: %s\n", *xattrname);
-			continue;
+		if (!strcmp(*xattrname, XATTR_NAME_SELINUX) && selinux_str) {
+			strcpy(xattr_value, selinux_str);
+			err = strlen(selinux_str) + 1;
+		} else if (!strcmp(*xattrname, XATTR_NAME_IMA) && ima_str) {
+			hex2bin(xattr_value, ima_str, strlen(ima_str) / 2);
+			err = strlen(ima_str) / 2;
+		} else if (!strcmp(*xattrname, XATTR_NAME_CAPS) && (hmac_flags & HMAC_FLAG_CAPS_SET)) {
+			if (!caps_str)
+				continue;
+			strcpy(xattr_value, caps_str);
+			err = strlen(caps_str);
+		} else {
+			err = lgetxattr(file, *xattrname, xattr_value, sizeof(xattr_value));
+			if (err < 0) {
+				log_info("no xattr: %s\n", *xattrname);
+				continue;
+			}
+			if (!find_xattr(list, list_size, *xattrname)) {
+				log_info("skipping xattr: %s\n", *xattrname);
+				continue;
+			}
 		}
 		/*log_debug("name: %s, value: %s, size: %d\n", *xattrname, xattr_value, err);*/
 		log_info("name: %s, size: %d\n", *xattrname, err);
 		log_debug_dump(xattr_value, err);
-		err = EVP_DigestUpdate(ctx, xattr_value, err);
+		err = EVP_DigestUpdate(pctx, xattr_value, err);
 		if (!err) {
 			log_err("EVP_DigestUpdate() failed\n");
 			return 1;
@@ -399,8 +426,10 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 		struct h_misc *hmac = (struct h_misc *)&hmac_misc;
 
 		hmac_size = sizeof(*hmac);
-		hmac->ino = st.st_ino;
-		hmac->generation = generation;
+		if (!evm_portable) {
+			hmac->ino = st.st_ino;
+			hmac->generation = generation;
+		}
 		hmac->uid = st.st_uid;
 		hmac->gid = st.st_gid;
 		hmac->mode = st.st_mode;
@@ -408,8 +437,10 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 		struct h_misc_64 *hmac = (struct h_misc_64 *)&hmac_misc;
 
 		hmac_size = sizeof(*hmac);
-		hmac->ino = st.st_ino;
-		hmac->generation = generation;
+		if (!evm_portable) {
+			hmac->ino = st.st_ino;
+			hmac->generation = generation;
+		}
 		hmac->uid = st.st_uid;
 		hmac->gid = st.st_gid;
 		hmac->mode = st.st_mode;
@@ -417,8 +448,10 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 		struct h_misc_32 *hmac = (struct h_misc_32 *)&hmac_misc;
 
 		hmac_size = sizeof(*hmac);
-		hmac->ino = st.st_ino;
-		hmac->generation = generation;
+		if (!evm_portable) {
+			hmac->ino = st.st_ino;
+			hmac->generation = generation;
+		}
 		hmac->uid = st.st_uid;
 		hmac->gid = st.st_gid;
 		hmac->mode = st.st_mode;
@@ -427,25 +460,26 @@ static int calc_evm_hash(const char *file, unsigned char *hash)
 	log_debug("hmac_misc (%d): ", hmac_size);
 	log_debug_dump(&hmac_misc, hmac_size);
 
-	err = EVP_DigestUpdate(ctx, &hmac_misc, hmac_size);
+	err = EVP_DigestUpdate(pctx, &hmac_misc, hmac_size);
 	if (!err) {
 		log_err("EVP_DigestUpdate() failed\n");
 		return 1;
 	}
 
-	if (!evm_immutable && (hmac_flags & HMAC_FLAG_UUID)) {
+	if (!evm_immutable && !evm_portable &&
+	    !(hmac_flags & HMAC_FLAG_NO_UUID)) {
 		err = get_uuid(&st, uuid);
 		if (err)
 			return -1;
 
-		err = EVP_DigestUpdate(ctx, (const unsigned char *)uuid, sizeof(uuid));
+		err = EVP_DigestUpdate(pctx, (const unsigned char *)uuid, sizeof(uuid));
 		if (!err) {
 			log_err("EVP_DigestUpdate() failed\n");
 			return 1;
 		}
 	}
 
-	err = EVP_DigestFinal(ctx, hash, &mdlen);
+	err = EVP_DigestFinal(pctx, hash, &mdlen);
 	if (!err) {
 		log_err("EVP_DigestFinal() failed\n");
 		return 1;
@@ -470,7 +504,10 @@ static int sign_evm(const char *file, const char *key)
 
 	/* add header */
 	len++;
-	sig[0] = EVM_IMA_XATTR_DIGSIG;
+	if (evm_portable)
+		sig[0] = EVM_XATTR_PORTABLE_DIGSIG;
+	else
+		sig[0] = EVM_IMA_XATTR_DIGSIG;
 
 	if (evm_immutable)
 		sig[1] = 3; /* immutable signature version */
@@ -728,12 +765,13 @@ static int verify_evm(const char *file)
 		return -1;
 	}
 
-	return verify_hash(hash, sizeof(hash), sig + 1, len - 1);
+	return verify_hash(file, hash, sizeof(hash), sig + 1, len - 1);
 }
 
 static int cmd_verify_evm(struct command *cmd)
 {
 	char *file = g_argv[optind++];
+	int err;
 
 	if (!file) {
 		log_err("Parameters missing\n");
@@ -741,7 +779,10 @@ static int cmd_verify_evm(struct command *cmd)
 		return -1;
 	}
 
-	return verify_evm(file);
+	err = verify_evm(file);
+	if (!err && params.verbose >= LOG_INFO)
+		log_info("%s: verification is OK\n", file);
+	return err;
 }
 
 static int verify_ima(const char *file)
@@ -749,7 +790,12 @@ static int verify_ima(const char *file)
 	unsigned char sig[1024];
 	int len;
 
-	if (xattr) {
+	if (sigfile) {
+		void *tmp = file2bin(file, "sig", &len);
+
+		memcpy(sig, tmp, len);
+		free(tmp);
+	} else {
 		len = lgetxattr(file, "security.ima", sig, sizeof(sig));
 		if (len < 0) {
 			log_err("getxattr failed: %s\n", file);
@@ -757,27 +803,56 @@ static int verify_ima(const char *file)
 		}
 	}
 
-	if (sigfile) {
-		void *tmp = file2bin(file, "sig", &len);
-
-		memcpy(sig, tmp, len);
-		free(tmp);
-	}
-
-	return ima_verify_signature(file, sig, len);
+	return ima_verify_signature(file, sig, len, NULL, 0);
 }
 
 static int cmd_verify_ima(struct command *cmd)
 {
 	char *file = g_argv[optind++];
+	int err;
 
+	errno = 0;
 	if (!file) {
 		log_err("Parameters missing\n");
 		print_usage(cmd);
 		return -1;
 	}
 
-	return verify_ima(file);
+	err = verify_ima(file);
+	if (!err && params.verbose >= LOG_INFO)
+		log_info("%s: verification is OK\n", file);
+	return err;
+}
+
+static int cmd_convert(struct command *cmd)
+{
+	char *inkey;
+	unsigned char _pub[1024], *pub = _pub;
+	int len, err = 0;
+	char name[20];
+	uint8_t keyid[8];
+	RSA *key;
+
+	params.x509 = 0;
+
+	inkey = g_argv[optind++];
+	if (!inkey) {
+		inkey = params.x509 ? "/etc/keys/x509_evm.der" :
+				      "/etc/keys/pubkey_evm.pem";
+	}
+
+	key = read_pub_key(inkey, params.x509);
+	if (!key)
+		return 1;
+
+	len = key2bin(key, pub);
+	calc_keyid_v1(keyid, name, pub, len);
+
+	bin2file(inkey, "bin", pub, len);
+	bin2file(inkey, "keyid", (const unsigned char *)name, strlen(name));
+
+	RSA_free(key);
+	return err;
 }
 
 static int cmd_import(struct command *cmd)
@@ -852,6 +927,42 @@ out:
 	return err;
 }
 
+static int setxattr_ima(const char *file, char *sig_file)
+{
+	unsigned char *sig;
+	int len, err;
+
+	if (sig_file)
+		sig = file2bin(sig_file, NULL, &len);
+	else
+		sig = file2bin(file, "sig", &len);
+	if (!sig)
+		return 0;
+
+	err = lsetxattr(file, "security.ima", sig, len, 0);
+	if (err < 0)
+		log_err("setxattr failed: %s\n", file);
+	free(sig);
+	return err;
+}
+
+static int cmd_setxattr_ima(struct command *cmd)
+{
+	char *file, *sig = NULL;
+
+	if (sigfile)
+		sig = g_argv[optind++];
+	file =  g_argv[optind++];
+
+	if (!file) {
+		log_err("Parameters missing\n");
+		print_usage(cmd);
+		return -1;
+	}
+
+	return setxattr_ima(file, sig);
+}
+
 #define MAX_KEY_SIZE 128
 
 static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *hash)
@@ -859,7 +970,7 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 	struct stat st;
 	int err = -1;
 	uint32_t generation = 0;
-	HMAC_CTX *ctx;
+	HMAC_CTX *pctx;
 	unsigned int mdlen;
 	char **xattrname;
 	unsigned char xattr_value[1024];
@@ -870,19 +981,12 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 	ssize_t list_size;
 	struct h_misc_64 hmac_misc;
 	int hmac_size;
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	ctx = HMAC_CTX_new();
+#if OPENSSL_VERSION_NUMBER < 0x10100000
+	HMAC_CTX ctx;
+	pctx = &ctx;
 #else
-	ctx = malloc(sizeof(*ctx);
+	pctx = HMAC_CTX_new();
 #endif
-
-	if (!ctx) {
-		fprintf(stderr, "Out of memory: HMAC_CTX!\n");
-		return(-1);
-	}
-
-	HMAC_CTX_reset(ctx);
 
 	key = file2bin(keyfile, NULL, &keylen);
 	if (!key) {
@@ -915,6 +1019,7 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 		}
 		if (ioctl(fd, FS_IOC_GETVERSION, &generation)) {
 			log_err("ioctl() failed\n");
+			close(fd);
 			goto out;
 		}
 		close(fd);
@@ -928,9 +1033,9 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 		goto out;
 	}
 
-	err = !HMAC_Init_ex(ctx, evmkey, sizeof(evmkey), EVP_sha1(), NULL);
+	err = !HMAC_Init_ex(pctx, evmkey, sizeof(evmkey), EVP_sha1(), NULL);
 	if (err) {
-		log_err("HMAC_Init_ex() failed\n");
+		log_err("HMAC_Init() failed\n");
 		goto out;
 	}
 
@@ -947,7 +1052,7 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 		/*log_debug("name: %s, value: %s, size: %d\n", *xattrname, xattr_value, err);*/
 		log_info("name: %s, size: %d\n", *xattrname, err);
 		log_debug_dump(xattr_value, err);
-		err = !HMAC_Update(ctx, xattr_value, err);
+		err = !HMAC_Update(pctx, xattr_value, err);
 		if (err) {
 			log_err("HMAC_Update() failed\n");
 			goto out_ctx_cleanup;
@@ -988,19 +1093,19 @@ static int calc_evm_hmac(const char *file, const char *keyfile, unsigned char *h
 	log_debug("hmac_misc (%d): ", hmac_size);
 	log_debug_dump(&hmac_misc, hmac_size);
 
-	err = !HMAC_Update(ctx, (const unsigned char *)&hmac_misc, hmac_size);
+	err = !HMAC_Update(pctx, (const unsigned char *)&hmac_misc, hmac_size);
 	if (err) {
 		log_err("HMAC_Update() failed\n");
 		goto out_ctx_cleanup;
 	}
-	err = !HMAC_Final(ctx, hash, &mdlen);
+	err = !HMAC_Final(pctx, hash, &mdlen);
 	if (err)
 		log_err("HMAC_Final() failed\n");
 out_ctx_cleanup:
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-	HMAC_CTX_reset(ctx);
+#if OPENSSL_VERSION_NUMBER < 0x10100000
+	HMAC_CTX_cleanup(pctx);
 #else
-	HMAC_CTX_cleanup(ctx);
+	HMAC_CTX_free(pctx);
 #endif
 out:
 	free(key);
@@ -1169,18 +1274,23 @@ static int cmd_ima_clear(struct command *cmd)
 	return do_cmd(cmd, ima_clear);
 }
 
-static char *pcrs = "/sys/class/misc/tpm0/device/pcrs";
+static char *pcrs = "/sys/class/tpm/tpm0/device/pcrs";  /* Kernels >= 4.0 */
+static char *misc_pcrs = "/sys/class/misc/tpm0/device/pcrs";
 
 static int tpm_pcr_read(int idx, uint8_t *pcr, int len)
 {
 	FILE *fp;
 	char *p, pcr_str[7], buf[70]; /* length of the TPM string */
+	int result = -1;
 
-	snprintf(pcr_str, sizeof(pcr_str), "PCR-%d", idx);
+	sprintf(pcr_str, "PCR-%d", idx);
 
 	fp = fopen(pcrs, "r");
+	if (!fp)
+		fp = fopen(misc_pcrs, "r");
+
 	if (!fp) {
-		log_err("Unable to open %s\n", pcrs);
+		log_err("Unable to open %s or %s\n", pcrs, misc_pcrs);
 		return -1;
 	}
 
@@ -1190,11 +1300,12 @@ static int tpm_pcr_read(int idx, uint8_t *pcr, int len)
 			break;
 		if (!strncmp(p, pcr_str, 6)) {
 			hex2bin(pcr, p + 7, len);
-			return 0;
+			result = 0;
+			break;
 		}
 	}
 	fclose(fp);
-	return -1;
+	return result;
 }
 
 #define TCG_EVENT_NAME_LEN_MAX	255
@@ -1229,7 +1340,7 @@ void ima_extend_pcr(uint8_t *pcr, uint8_t *digest, int length)
 	SHA1_Final(pcr, &ctx);
 }
 
-static int ima_verify_tamplate_hash(struct template_entry *entry)
+static int ima_verify_template_hash(struct template_entry *entry)
 {
 	uint8_t digest[SHA_DIGEST_LENGTH];
 
@@ -1259,9 +1370,10 @@ void ima_ng_show(struct template_entry *entry)
 	int total_len = entry->template_len, digest_len, len, sig_len;
 	uint8_t *digest, *sig = NULL;
 	char *algo, *path;
+	int err;
 
 	/* get binary digest */
-	field_len = *(uint8_t *)fieldp;
+	field_len = *(uint32_t *)fieldp;
 	fieldp += sizeof(field_len);
 	total_len -= sizeof(field_len);
 
@@ -1275,7 +1387,7 @@ void ima_ng_show(struct template_entry *entry)
 	total_len -= field_len;
 
 	/* get path */
-	field_len = *(uint8_t *)fieldp;
+	field_len = *(uint32_t *)fieldp;
 	fieldp += sizeof(field_len);
 	total_len -= sizeof(field_len);
 
@@ -1287,7 +1399,7 @@ void ima_ng_show(struct template_entry *entry)
 
 	if (!strcmp(entry->name, "ima-sig")) {
 		/* get signature */
-		field_len = *(uint8_t *)fieldp;
+		field_len = *(uint32_t *)fieldp;
 		fieldp += sizeof(field_len);
 		total_len -= sizeof(field_len);
 
@@ -1302,18 +1414,30 @@ void ima_ng_show(struct template_entry *entry)
 	}
 
 	/* ascii_runtime_measurements */
-	log_info("%d ", entry->header.pcr);
-	log_dump_n(entry->header.digest, sizeof(entry->header.digest));
-	log_info(" %s %s", entry->name, algo);
-	log_dump_n(digest, digest_len);
-	log_info(" %s", path);
+	if (params.verbose > LOG_INFO) {
+		log_info("%d ", entry->header.pcr);
+		log_dump_n(entry->header.digest, sizeof(entry->header.digest));
+		log_info(" %s %s", entry->name, algo);
+		log_dump_n(digest, digest_len);
+		log_info(" %s", path);
+	}
 
 	if (sig) {
-		log_info(" ");
-		log_dump(sig, sig_len);
-		ima_verify_signature(path, sig, sig_len);
-	} else
-		log_info("\n");
+		if (params.verbose > LOG_INFO) {
+			log_info(" ");
+			log_dump(sig, sig_len);
+		}
+		if (measurement_list)
+			err = ima_verify_signature(path, sig, sig_len,
+						   digest, digest_len);
+		else
+			err = ima_verify_signature(path, sig, sig_len, NULL, 0);
+		if (!err && params.verbose > LOG_INFO)
+			log_info("%s: verification is OK\n", path);
+	} else {
+		if (params.verbose > LOG_INFO)
+			log_info("\n");
+	}
 
 	if (total_len)
 		log_err("Remain unprocessed data: %d\n", total_len);
@@ -1321,12 +1445,16 @@ void ima_ng_show(struct template_entry *entry)
 
 static int ima_measurement(const char *file)
 {
-	uint8_t pcr[SHA_DIGEST_LENGTH] = {0,};
-	uint8_t pcr10[SHA_DIGEST_LENGTH];
+	uint8_t pcr[NUM_PCRS][SHA_DIGEST_LENGTH] = {{0}};
+	uint8_t hwpcr[SHA_DIGEST_LENGTH];
 	struct template_entry entry = { .template = 0 };
 	FILE *fp;
 	int err = -1;
+	bool verify_failed = false;
+	int i;
 
+	errno = 0;
+	memset(zero, 0, SHA_DIGEST_LENGTH);
 	memset(fox, 0xff, SHA_DIGEST_LENGTH);
 
 	log_debug("Initial PCR value: ");
@@ -1338,8 +1466,13 @@ static int ima_measurement(const char *file)
 		return -1;
 	}
 
+	/* Support multiple public keys */
+	if (params.keyfile)
+		init_public_keys(params.keyfile);
+
 	while (fread(&entry.header, sizeof(entry.header), 1, fp)) {
-		ima_extend_pcr(pcr, entry.header.digest, SHA_DIGEST_LENGTH);
+		ima_extend_pcr(pcr[entry.header.pcr], entry.header.digest,
+			       SHA_DIGEST_LENGTH);
 
 		if (!fread(entry.name, entry.header.name_len, 1, fp)) {
 			log_err("Unable to read template name\n");
@@ -1365,7 +1498,7 @@ static int ima_measurement(const char *file)
 		}
 
 		if (validate)
-			ima_verify_tamplate_hash(&entry);
+			ima_verify_template_hash(&entry);
 
 		if (!strcmp(entry.name, "ima"))
 			ima_show(&entry);
@@ -1373,23 +1506,29 @@ static int ima_measurement(const char *file)
 			ima_ng_show(&entry);
 	}
 
-	tpm_pcr_read(10, pcr10, sizeof(pcr10));
 
-	log_info("PCRAgg: ");
-	log_dump(pcr, sizeof(pcr));
+	for (i = 0; i < NUM_PCRS; i++) {
+		if (memcmp(pcr[i], zero, SHA_DIGEST_LENGTH) == 0)
+			continue;
 
-	log_info("PCR-10: ");
-	log_dump(pcr10, sizeof(pcr10));
+		log_info("PCRAgg %.2d: ", i);
+		log_dump(pcr[i], SHA_DIGEST_LENGTH);
 
-	if (memcmp(pcr, pcr10, sizeof(pcr))) {
-		log_err("PCRAgg does not match PCR-10\n");
-		goto out;
+		tpm_pcr_read(i, hwpcr, sizeof(hwpcr));
+		log_info("HW PCR-%d: ", i);
+		log_dump(hwpcr, sizeof(hwpcr));
+
+		if (memcmp(pcr[i], hwpcr, sizeof(SHA_DIGEST_LENGTH)) != 0) {
+			log_err("PCRAgg %d does not match HW PCR-%d\n", i, i);
+
+			verify_failed = true;
+		}
 	}
 
-	err = 0;
+	if (!verify_failed)
+		err = 0;
 out:
 	fclose(fp);
-
 	return err;
 }
 
@@ -1482,6 +1621,7 @@ static void usage(void)
 		"  -f, --sigfile      store IMA signature in .sig file instead of xattr\n"
 		"      --rsa          use RSA key type and signing scheme v1\n"
 		"  -k, --key          path to signing key (default: /etc/keys/{privkey,pubkey}_evm.pem)\n"
+		"  -o, --portable     generate portable EVM signatures\n"
 		"  -p, --pass         password for encrypted signing key\n"
 		"  -r, --recursive    recurse into directories (sign)\n"
 		"  -t, --type         file types to fix 'fdsxm' (f: file, d: directory, s: block/char/symlink)\n"
@@ -1492,6 +1632,15 @@ static void usage(void)
 		"      --smack        use extra SMACK xattrs for EVM\n"
 		"      --m32          force EVM hmac/signature for 32 bit target system\n"
 		"      --m64          force EVM hmac/signature for 64 bit target system\n"
+		"      --ino          use custom inode for EVM\n"
+		"      --uid          use custom UID for EVM\n"
+		"      --gid          use custom GID for EVM\n"
+		"      --mode         use custom Mode for EVM\n"
+		"      --generation   use custom Generation for EVM(unspecified: from FS, empty: use 0)\n"
+		"      --ima          use custom IMA signature for EVM\n"
+		"      --selinux      use custom Selinux label for EVM\n"
+		"      --caps         use custom Capabilities for EVM(unspecified: from FS, empty: do not use)\n"
+		"      --list         measurement list verification\n"
 		"  -v                 increase verbosity level\n"
 		"  -h, --help         display this help and exit\n"
 		"\n");
@@ -1501,10 +1650,12 @@ struct command cmds[] = {
 	{"--version", NULL, 0, ""},
 	{"help", cmd_help, 0, "<command>"},
 	{"import", cmd_import, 0, "[--rsa] pubkey keyring", "Import public key into the keyring.\n"},
+	{"convert", cmd_convert, 0, "key", "convert public key into the keyring.\n"},
 	{"sign", cmd_sign_evm, 0, "[-r] [--imahash | --imasig ] [--key key] [--pass [password] file", "Sign file metadata.\n"},
 	{"verify", cmd_verify_evm, 0, "file", "Verify EVM signature (for debugging).\n"},
 	{"ima_sign", cmd_sign_ima, 0, "[--sigfile] [--key key] [--pass [password] file", "Make file content signature.\n"},
 	{"ima_verify", cmd_verify_ima, 0, "file", "Verify IMA signature (for debugging).\n"},
+	{"ima_setxattr", cmd_setxattr_ima, 0, "[--sigfile file]", "Set IMA signature from sigfile\n"},
 	{"ima_hash", cmd_hash_ima, 0, "file", "Make file content hash.\n"},
 	{"ima_measurement", cmd_ima_measurement, 0, "file", "Verify measurement list (experimental).\n"},
 	{"ima_fix", cmd_ima_fix, 0, "[-t fdsxm] path", "Recursively fix IMA/EVM xattrs in fix mode.\n"},
@@ -1530,8 +1681,18 @@ static struct option opts[] = {
 	{"recursive", 0, 0, 'r'},
 	{"m32", 0, 0, '3'},
 	{"m64", 0, 0, '6'},
-	{"smack", 0, 0, 256},
-	{"version", 0, 0, 257},
+	{"portable", 0, 0, 'o'},
+	{"smack", 0, 0, 128},
+	{"version", 0, 0, 129},
+	{"inode", 1, 0, 130},
+	{"uid", 1, 0, 131},
+	{"gid", 1, 0, 132},
+	{"mode", 1, 0, 133},
+	{"generation", 1, 0, 134},
+	{"ima", 1, 0, 135},
+	{"selinux", 1, 0, 136},
+	{"caps", 2, 0, 137},
+	{"list", 0, 0, 138},
 	{}
 
 };
@@ -1578,7 +1739,7 @@ int main(int argc, char *argv[])
 	g_argc = argc;
 
 	while (1) {
-		c = getopt_long(argc, argv, "hvnsda:p::fu::k:t:ri", opts, &lind);
+		c = getopt_long(argc, argv, "hvnsda:op::fu::k:t:ri", opts, &lind);
 		if (c == -1)
 			break;
 
@@ -1612,14 +1773,11 @@ int main(int argc, char *argv[])
 			break;
 		case 'f':
 			sigfile = 1;
-			xattr = 0;
 			break;
 		case 'u':
 			uuid_str = optarg;
-			if (uuid_str)
-				hmac_flags |= HMAC_FLAG_UUID_SET;
-			else
-				hmac_flags &= ~HMAC_FLAG_UUID;
+			if (!uuid_str)
+				hmac_flags |= HMAC_FLAG_NO_UUID;
 			break;
 		case '1':
 			params.x509 = 0;
@@ -1628,7 +1786,16 @@ int main(int argc, char *argv[])
 			params.keyfile = optarg;
 			break;
 		case 'i':
-			evm_immutable = true;
+			if (evm_portable)
+				log_err("Portable and immutable options are exclusive, ignoring immutable option.");
+			else
+				evm_immutable = true;
+			break;
+		case 'o':
+			if (evm_immutable)
+				log_err("Portable and immutable options are exclusive, ignoring portable option.");
+			else
+				evm_portable = true;
 			break;
 		case 't':
 			search_type = optarg;
@@ -1642,12 +1809,40 @@ int main(int argc, char *argv[])
 		case '6':
 			msize = 64;
 			break;
-		case 256:
+		case 128:
 			evm_config_xattrnames = evm_extra_smack_xattrs;
 			break;
-		case 257:
+		case 129:
 			printf("evmctl %s\n", VERSION);
 			exit(0);
+			break;
+		case 130:
+			ino_str = optarg;
+			break;
+		case 131:
+			uid_str = optarg;
+			break;
+		case 132:
+			gid_str = optarg;
+			break;
+		case 133:
+			mode_str = optarg;
+			break;
+		case 134:
+			generation_str = optarg;
+			break;
+		case 135:
+			ima_str = optarg;
+			break;
+		case 136:
+			selinux_str = optarg;
+			break;
+		case 137:
+			caps_str = optarg;
+			hmac_flags |= HMAC_FLAG_CAPS_SET;
+			break;
+		case 138:
+			measurement_list = 1;
 			break;
 		case '?':
 			exit(1);
