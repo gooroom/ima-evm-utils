@@ -1,0 +1,119 @@
+diff --git a/configure.ac b/configure.ac
+index 6822f39..59af40d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -25,6 +25,7 @@ LT_INIT
+ AC_HEADER_STDC
+ 
+ PKG_CHECK_MODULES(OPENSSL, [ openssl >= 0.9.8 ])
++PKG_CHECK_MODULES([GLIB], [glib-2.0])
+ AC_SUBST(OPENSSL_CFLAGS)
+ AC_SUBST(OPENSSL_LIBS)
+ AC_CHECK_HEADER(unistd.h)
+diff --git a/src/Makefile.am b/src/Makefile.am
+index deb18fb..9d4300e 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -12,9 +12,9 @@ include_HEADERS = imaevm.h
+ bin_PROGRAMS = evmctl
+ 
+ evmctl_SOURCES = evmctl.c
+-evmctl_CPPFLAGS = $(OPENSSL_CFLAGS)
++evmctl_CPPFLAGS = $(OPENSSL_CFLAGS) $(GLIB_CFLAGS)
+ evmctl_LDFLAGS = $(LDFLAGS_READLINE)
+-evmctl_LDADD =  $(OPENSSL_LIBS) -lkeyutils libimaevm.la
++evmctl_LDADD =  $(OPENSSL_LIBS) $(GLIB_LIBS) -lkeyutils libimaevm.la
+ 
+ INCLUDES = -I$(top_srcdir) -include config.h
+ 
+diff --git a/src/evmctl.c b/src/evmctl.c
+index 2ffee78..789cfe1 100644
+--- a/src/evmctl.c
++++ b/src/evmctl.c
+@@ -144,9 +144,9 @@ static int bin2file(const char *file, const char *ext, const unsigned char *data
+ 	int err;
+ 
+ 	if (ext)
+-		sprintf(name, "%s.%s", file, ext);
++		snprintf(name, sizeof(name), "%s.%s", file, ext);
+ 	else
+-		sprintf(name, "%s", file);
++		snprintf(name, sizeof(name), "%s", file);
+ 
+ 	log_info("Writing to %s\n", name);
+ 
+@@ -168,9 +168,9 @@ static unsigned char *file2bin(const char *file, const char *ext, int *size)
+ 	char name[strlen(file) + (ext ? strlen(ext) : 0) + 2];
+ 
+ 	if (ext)
+-		sprintf(name, "%s.%s", file, ext);
++		snprintf(name, sizeof(name), "%s.%s", file, ext);
+ 	else
+-		sprintf(name, "%s", file);
++		snprintf(name, sizeof(name), "%s", file);
+ 
+ 	log_info("Reading to %s\n", name);
+ 
+@@ -282,9 +282,7 @@ static int get_uuid(struct stat *st, char *uuid)
+ {
+ 	uint32_t dev;
+ 	unsigned minor, major;
+-	char path[PATH_MAX], _uuid[37];
+-	FILE *fp;
+-	size_t len;
++	char _uuid[37], *p_uuid = NULL, *cmd = NULL;
+ 
+ 	if (uuid_str)
+ 		return pack_uuid(uuid_str, uuid);
+@@ -294,15 +292,19 @@ static int get_uuid(struct stat *st, char *uuid)
+ 	minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
+ 
+ 	log_debug("dev: %u:%u\n", major, minor);
+-	sprintf(path, "blkid -s UUID -o value /dev/block/%u:%u", major, minor);
+ 
+-	fp = popen(path, "r");
+-	if (!fp)
++	cmd = g_strdup_printf ("/sbin/blkid -s UUID -o value /dev/block/%u:%u", major, minor);
++	if (!g_spawn_command_line_sync (cmd, &p_uuid, NULL, NULL, NULL)) {
++		g_free (cmd);
+ 		goto err;
++	}
++
++	snprintf(_uuid, sizeof(_uuid), "%s", p_uuid);
++
++	g_free (p_uuid);
++	g_free (cmd);
+ 
+-	len = fread(_uuid, 1, sizeof(_uuid), fp);
+-	pclose(fp);
+-	if (len != sizeof(_uuid))
++	if (strlen(_uuid) != 37)
+ 		goto err;
+ 
+ 	return pack_uuid(_uuid, uuid);
+@@ -1283,7 +1285,7 @@ static int tpm_pcr_read(int idx, uint8_t *pcr, int len)
+ 	char *p, pcr_str[7], buf[70]; /* length of the TPM string */
+ 	int result = -1;
+ 
+-	sprintf(pcr_str, "PCR-%d", idx);
++	snprintf(pcr_str, sizeof(pcr_str), "PCR-%d", idx);
+ 
+ 	fp = fopen(pcrs, "r");
+ 	if (!fp)
+diff --git a/src/imaevm.h b/src/imaevm.h
+index 1bafaad..b89c49d 100644
+--- a/src/imaevm.h
++++ b/src/imaevm.h
+@@ -50,10 +50,10 @@
+ #include <openssl/rsa.h>
+ 
+ #ifdef USE_FPRINTF
+-#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, fmt, ##args); })
++#define do_log(level, fmt, args...)	({ if (level <= params.verbose) fprintf(stderr, "%s", fmt, ##args); })
+ #define do_log_dump(level, p, len, cr)	({ if (level <= params.verbose) do_dump(stderr, p, len, cr); })
+ #else
+-#define do_log(level, fmt, args...)	syslog(level, fmt, ##args)
++#define do_log(level, fmt, args...)	syslog(level, "%s", fmt, ##args)
+ #define do_log_dump(level, p, len, cr)
+ #endif
+ 
