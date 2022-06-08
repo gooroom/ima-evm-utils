@@ -1,3 +1,10 @@
+ima-evm-utils (1.1-0ubuntu2+grm3u1) jammy; urgency=medium
+
+  [ jongkyung.woo ]
+  * [73950d84] Added Gooroom Patchset
+
+ -- Gooroom Autobuilder <jenkins@gooroom.kr>  Wed, 08 Jun 2022 18:15:47 +0900
+
 ima-evm-utils (1.1-0ubuntu2) jammy; urgency=medium
 
   * No-change rebuild against openssl3
