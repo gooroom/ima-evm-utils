@@ -13,7 +13,8 @@ Build-Depends: asciidoc,
  openssl,
  pkg-config,
  xsltproc,
- xxd
+ xxd,
+ libglib2.0-dev
 Homepage: https://sourceforge.net/projects/linux-ima/
 Vcs-Browser: https://salsa.debian.org/lumag/ima-evm-utils
 Vcs-Git: https://salsa.debian.org/lumag/ima-evm-utils.git

@@ -1,0 +1,120 @@
+diff --git a/configure.ac b/configure.ac
+index 1a0f093..2f2318b 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -26,6 +26,7 @@ LT_INIT
+ AC_HEADER_STDC
+ 
+ PKG_CHECK_MODULES(LIBCRYPTO, [libcrypto >= 0.9.8 ])
++PKG_CHECK_MODULES([GLIB], [glib-2.0])
+ AC_SUBST(KERNEL_HEADERS)
+ AC_CHECK_HEADER(unistd.h)
+ AC_CHECK_HEADERS(openssl/conf.h)
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 396496b..7396e3e 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -18,9 +18,9 @@ hash_info.h: Makefile
+ bin_PROGRAMS = evmctl
+ 
+ evmctl_SOURCES = evmctl.c utils.c
+-evmctl_CPPFLAGS = $(AM_CPPFLAGS) $(LIBCRYPTO_CFLAGS)
++evmctl_CPPFLAGS = $(AM_CPPFLAGS) $(LIBCRYPTO_CFLAGS) $(GLIB_CFLAGS)
+ evmctl_LDFLAGS = $(LDFLAGS_READLINE)
+-evmctl_LDADD =  $(LIBCRYPTO_LIBS) -lkeyutils libimaevm.la
++evmctl_LDADD =  $(LIBCRYPTO_LIBS) $(GLIB_LIBS) -lkeyutils libimaevm.la
+ 
+ # USE_PCRTSS uses the Intel TSS
+ if USE_PCRTSS
+diff --git a/src/evmctl.c b/src/evmctl.c
+index 8cd1409..1940259 100644
+--- a/src/evmctl.c
++++ b/src/evmctl.c
+@@ -172,9 +172,9 @@ static int bin2file(const char *file, const char *ext, const unsigned char *data
+ 	int err;
+ 
+ 	if (ext)
+-		sprintf(name, "%s.%s", file, ext);
++		snprintf(name, sizeof(name), "%s.%s", file, ext);
+ 	else
+-		sprintf(name, "%s", file);
++		snprintf(name, sizeof(name), "%s", file);
+ 
+ 	log_info("Writing to %s\n", name);
+ 
+@@ -197,9 +197,9 @@ static unsigned char *file2bin(const char *file, const char *ext, int *size)
+ 	struct stat stats;
+ 
+ 	if (ext)
+-		sprintf(name, "%s.%s", file, ext);
++		snprintf(name, sizeof(name), "%s.%s", file, ext);
+ 	else
+-		sprintf(name, "%s", file);
++		snprintf(name, sizeof(name), "%s", file);
+ 
+ 	log_info("Reading to %s\n", name);
+ 
+@@ -297,9 +297,7 @@ static int get_uuid(struct stat *st, char *uuid)
+ {
+ 	uint32_t dev;
+ 	unsigned minor, major;
+-	char path[PATH_MAX], _uuid[37];
+-	FILE *fp;
+-	size_t len;
++	char _uuid[37], *p_uuid = NULL, *cmd = NULL;
+ 	static unsigned last_minor = 0, last_major = 0;
+ 	static char last_uuid[37];
+ 
+@@ -316,15 +314,19 @@ static int get_uuid(struct stat *st, char *uuid)
+ 	}
+ 
+ 	log_debug("dev: %u:%u\n", major, minor);
+-	sprintf(path, "blkid -s UUID -o value /dev/block/%u:%u", major, minor);
+ 
+-	fp = popen(path, "r");
+-	if (!fp)
++	cmd = g_strdup_printf ("/sbin/blkid -s UUID -o value /dev/block/%u:%u", major, minor);
++	if (!g_spawn_command_line_sync (cmd, &p_uuid, NULL, NULL, NULL)) {
++		g_free (cmd);
+ 		goto err;
++	}
++
++	snprintf(_uuid, sizeof(_uuid), "%s", p_uuid);
++
++	g_free (p_uuid);
++	g_free (cmd);
+ 
+-	len = fread(_uuid, 1, sizeof(_uuid), fp);
+-	pclose(fp);
+-	if (len != sizeof(_uuid))
++	if (strlen(_uuid) != 37)
+ 		goto err;
+ 
+ 	last_major = major;
+#@@ -1820,7 +1822,7 @@ static int read_one_bank(struct tpm_bank_info *tpm_bank, FILE *fp)
+# 		p = fgets(buf, sizeof(buf), fp);
+# 		if (!p || i >= NUM_PCRS)
+# 			break;
+#-		sprintf(pcr_str, "PCR-%2.2d", i);
+#+		snprintf(pcr_str, sizeof(pcr_str), "PCR-%2.2d", i);
+# 		if (!strncmp(p, pcr_str, 6))
+# 			hex2bin(tpm_bank->pcr[i++], p + 7, tpm_bank->digest_size);
+# 		result = 0;
+diff --git a/src/imaevm.h b/src/imaevm.h
+index 0d53a02..d41af43 100644
+--- a/src/imaevm.h
++++ b/src/imaevm.h
+@@ -52,11 +52,11 @@
+ 
+ #ifdef USE_FPRINTF
+ #define do_log(level, fmt, args...)	\
+-	({ if (level <= imaevm_params.verbose) fprintf(stderr, fmt, ##args); })
++	({ if (level <= imaevm_params.verbose) fprintf(stderr, "%s", fmt, ##args); })
+ #define do_log_dump(level, p, len, cr)	\
+ 	({ if (level <= imaevm_params.verbose) imaevm_do_hexdump(stderr, p, len, cr); })
+ #else
+-#define do_log(level, fmt, args...)	syslog(level, fmt, ##args)
++#define do_log(level, fmt, args...)	syslog(level, "%s", fmt, ##args)
+ #define do_log_dump(level, p, len, cr)
+ #endif
+

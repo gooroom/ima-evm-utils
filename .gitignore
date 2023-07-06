@@ -52,8 +52,8 @@ manpage.links
 manpage.refs
 
 # quilt's files
-patches
-series
+#patches
+#series
 
 # test output
 
